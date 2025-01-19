@@ -1,5 +1,5 @@
-site_name: Python Project Template
-site_url: https://github.com/aniketmaurya/python-project-template
+site_name: RPC Kittens! Cute asyncio HTTP-RPC microservices for fun and profit
+site_url: https://github.com/mailpile/kettlingar
 theme:
   name: material
   palette:

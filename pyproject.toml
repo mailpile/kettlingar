@@ -3,26 +3,25 @@ requires = ["setuptools", "setuptools-scm"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "python-template-project"
-description = "Python template project"
+name = "kettlingar"
+description = "Cute asyncio HTTP-RPC microservices"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = {file = "LICENSE"}
 dynamic = ["version"]
 dependencies = [
-    "litserve>=0.2.5",
 ]
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["python_project_template*"]
+include = ["kettlingar*"]
 
 [tool.setuptools.dynamic]
-version = {attr = "python_project_template.__version__"}
+version = {attr = "kettlingar.__version__"}
 
 [tool.ruff]
 line-length = 120
-target-version = "py39"
+target-version = "py310"
 lint.select = ["I"]# implementation for isort
 
 [dependency-groups]
