@@ -20,7 +20,7 @@ where = ["src"]
 include = ["kettlingar*"]
 
 [tool.setuptools.dynamic]
-version = {attr = "kettlingar.__version__"}
+version = {attr = "kettlingar.__version__.__version__"}
 
 [tool.ruff]
 line-length = 120

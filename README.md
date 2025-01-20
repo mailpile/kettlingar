@@ -24,7 +24,7 @@
   </a>
 </p>
 
-# Features
+# What's this?
 
 Kettingar is a micro-framework for building Python microservices that
 expose an HTTP/1.1 interface. The motivation was to make it easy to
@@ -32,10 +32,12 @@ split a complex application into multiple cooperating processes.
 
 - Fully async
 - Authenticated and unauthenticated API methods
-- Supports JSON or msgpack for RPC request/response
+- Allows generator functions to incrementally provide results
+- Supports msgpack (preferred) or JSON for RPC request/response
 - Serve over TCP/IP and over a local unix domain socket
   - Supports passing open file descriptors over the socket
-- Built in CLI for starting/stopping/interacting with the RPC server
+- Built in CLI for starting/stopping/interacting with the service
+
 
 # Installation
 
@@ -57,6 +59,8 @@ pip install -e ".[dev]"
 
 ## Usage
 
+See the [`examples/`](./examples/) folder for helpful code snippets.
+
 This is a kettlingar microservice named MyKitten:
 
 ```python
@@ -64,7 +68,7 @@ from kettlingar import RPCKitten
 
 class MyKitten(RPCKitten):
     class Configuration(RPCKitten.Configuration):
-        pass
+        APP_NAME = 'mykitten'
 
     async def pub_meow(self, method, headers, body):
         """
@@ -84,12 +88,6 @@ class MyKitten(RPCKitten):
                 '_format': 'Kitty says %(purr)s'}
             asyncio.sleep(1)
 
-    async def call_meow(self):
-        """
-        Convenience function for invoking the 'meow' method.
-        """
-        return await self.call('meow')
-
 
 if __name__ == '__main__':
     import sys
@@ -101,8 +99,9 @@ This is an app that uses the microservice:
 ```python
 from mykitten import MyKitten
 
-w = MyKitten()
+kitty = MyKitten().connect(auto_start=True)
 
+print('Result: %s' % kitty.sync_call('meow'))
 ```
 
 # Development
@@ -151,12 +150,13 @@ Please make sure to update tests as appropriate and follow the existing coding s
 # Kettlingar? Huh?
 
 Kettlingar means "kittens" in Icelandic. This is a spin-off project from
-[moggie](https://github.com/mailpile/moggie/) and the author is Icelandic.
+[moggie](https://github.com/mailpile/moggie/) (a moggie is a cat) and the
+author is Icelandic.
 
 
 # License and Credits
 
-[MIT](https://choosealicense.com/licenses/mit/) - Feel free to use this template for your projects!
+[MIT](https://choosealicense.com/licenses/mit/), have fun!
 
 Created by Bjarni R. Einarsson for use with moggie and other things besides.
 
