@@ -921,12 +921,19 @@ Content-Length: %d
 
         return raw_method
 
+    def is_authed(self, headers):
+        """
+        Public API functions can call this method to check whether an
+        incoming request was authenticated or not.
+        """
+        return headers['_AUTHED']
+
     async def public_raw_ping(self, writer, mt, enc, method, headers, body):
         """/ping
 
         Check whether the microservice is running.
         """
-        if headers['_AUTHED']:
+        if self.is_authed(headers):
             if not isinstance(body, dict):
                 body = {}
 
@@ -1007,6 +1014,10 @@ Content-Length: %d
 
             args = [1, 2, '--three=four', 4]
             args, kwargs = RPCKitten.extract_kwargs(args, ['three'])
+
+            # args == [1, 2, 4]
+            # kwargs == {'three': 'four'}
+
         """
         is_arg = lambda a: isinstance(a, str) and a[:2] == '--'
         kwargs = dict(a[2:].split('=', 1) for a in args if is_arg(a))

@@ -11,7 +11,7 @@ class MyKitten(RPCKitten, RPCKittenVarz):
     """
 
     COMMAND_KWARGS = {
-        'purr': ['purr', 'count']}
+        'purr': ['purr', 'count']}  # Enable sanity checks in the CLI
 
     class Configuration(RPCKitten.Configuration):
         APP_NAME = 'mykitten'
