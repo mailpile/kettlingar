@@ -91,6 +91,7 @@ class RPCKitten:
         APP_STATE_DIR = None
 
         WORKER_NAME = 'worker'
+        WORKER_CONFIG = ''
 
         WORKER_NICE = 0
         WORKER_UMASK = 0o770
@@ -153,7 +154,24 @@ class RPCKitten:
                 if not os.path.exists(self.app_data_dir):
                     _mkdirp(self.app_data_dir, self.worker_umask)
 
-        def configure(self, args, strict=True):
+        def _configure_from_file(self, path):
+            def _clean_line(line):
+                if line[:2] == '--':
+                    line = line[2:]
+                if '#' in line:
+                    line = line[:line.index('#')]
+                return line.strip()
+
+            file_config = []
+            with open(path, 'r') as fd:
+                for line in (_clean_line(l) for l in fd):
+                    if line:
+                        key, val = (p.strip() for p in line.split('='))
+                        file_config.append('--%s=%s' % (key, val))
+
+            self.configure(file_config, strict=True, set_defaults=False)
+
+        def configure(self, args, strict=True, set_defaults=True):
             consumed = set()
 
             def _kv(i):
@@ -186,12 +204,15 @@ class RPCKitten:
                                 raise ValueError('Not a dict: %s' % val)
                         setattr(self, key, val)
                         consumed.add(arg)
+                        if key == 'worker_config':
+                            self._configure_from_file(val)
 
             unconsumed = [a for a in args if a not in consumed]
             if unconsumed and strict:
                 raise ValueError('Unrecognized arguments: %s' % unconsumed)
 
-            self._set_defaults()
+            if set_defaults:
+                self._set_defaults()
 
             return unconsumed
 

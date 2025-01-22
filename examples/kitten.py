@@ -11,6 +11,7 @@ class MyKitten(RPCKitten, RPCKittenVarz):
     """
     class Configuration(RPCKitten.Configuration):
         APP_NAME = 'mykitten'
+        WORKER_NAME = 'Kitty'
 
     async def public_api_meow(self, method, headers, body):
         """
@@ -30,7 +31,7 @@ class MyKitten(RPCKitten, RPCKittenVarz):
         for i in range(0, int(count)):
             yield None, {
                 'purr': 'purr' * (i + 1),
-                '_format': 'Kitty says %(purr)s'}
+                '_format': '%s says %%(purr)s' % self.config.worker_name}
             await asyncio.sleep(1)
 
 
