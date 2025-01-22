@@ -56,6 +56,9 @@ class RPCKitten:
                    b'Transfer-Encoding: chunked\n'
                    b'Content-Type: %s\n'
                    b'Connection: close\n\n')
+    _HTTP_200_STATIC_PONG = (b'HTTP/1.1 200 OK\n'
+                   b'Content-Type: text/plain\n'
+                   b'Connection: close\n\nPong\n')
 
     _HTTP_CHUNK_BEG = b'%x\r\n'
     _HTTP_CHUNK_END = b'\r\n'
@@ -72,6 +75,9 @@ class RPCKitten:
                      b'Connection: close\n\n')
     _HTTP_JSON = (b'Content-Type: application/json\n'
                  b'Connection: close\n\n')
+    _HTTP_NOT_FOUND = (b'Content-Type: application/json\n'
+                  b'Connection: close\n\n'
+                  b'{"error": "Not Found"}\n')
     _HTTP_SORRY = (b'Content-Type: application/json\n'
                   b'Connection: close\n\n'
                   b'{"error": "Sorry"}\n')
@@ -88,11 +94,14 @@ class RPCKitten:
 
         WORKER_NICE = 0
         WORKER_UMASK = 0o770
+        WORKER_SECRET = ''
         WORKER_LISTEN_QUEUE = 5
         WORKER_ACCEPT_TIMEOUT = 1
         WORKER_LISTEN_HOST = '127.0.0.1'
         WORKER_LISTEN_PORT = 0
-        WORKER_LISTEN_PATH = ''
+        WORKER_URL_PATH = ''
+        WORKER_USE_TCP = True
+        WORKER_USE_UNIXDOMAIN = True
         WORKER_LOG_LEVEL = 0  # 20 sets the default to info
 
         WORKER_HTTP_REQUEST_TIMEOUT1 = 1.0
@@ -196,8 +205,7 @@ class RPCKitten:
         self.config = config
         self.name = config.worker_name
 
-        self._server = None
-        self._unix_server = None
+        self._servers = []
         self._urlfile = os.path.join(
             config.app_state_dir,
             config.worker_name + '.url')
@@ -220,6 +228,7 @@ class RPCKitten:
 
     api_url = property(lambda s: s._url)
     api_addr = property(lambda s: s._peeraddr)
+    api_secret = property(lambda s: s._secret)
 
     def _init_convenience_methods(self):
         def _mk_func(fname, api_method):
@@ -265,7 +274,7 @@ class RPCKitten:
             if tried < retry - 1:
                 await asyncio.sleep(0.05 + (tried * 0.15))
 
-        self.error('Failed to connect to %s', self._urlfile)
+        self.error('Failed to connect to %s', self._url or self._urlfile)
         raise self.NotRunning()
 
     def _proc_title(self, sockdesc):
@@ -287,9 +296,7 @@ class RPCKitten:
 
     def _real_shutdown(self, exitcode=0):
         self._remove_files()
-        for _server in (
-                self._unix_server,
-                self._server):
+        for _server in self._servers:
             try:
                 _server.close()
             except:
@@ -354,7 +361,10 @@ class RPCKitten:
             if self.config.worker_nice and hasattr(os, 'nice'):
                 os.nice(self.config.worker_nice)
 
-            sock_desc, self._sock = self._make_server_socket()
+            if self.config.worker_use_tcp:
+                sock_desc, self._sock = self._make_server_socket()
+            else:
+                sock_desc = 'unix-domain:0'
 
             self._url = self._make_url(sock_desc)
             with open(self._urlfile, 'w') as fd:
@@ -437,6 +447,12 @@ class RPCKitten:
             peer = writer._transport._sock.getpeername() or ['unix-domain']
 
             try:
+                if self.config.worker_url_path:
+                    if path.startswith('/' + self.config.worker_url_path):
+                        path = path[len(self.config.worker_url_path) + 1:]
+                    else:
+                        raise AttributeError()
+
                 path = await self._validate_request_header(path, head)
                 authed = True
             except PermissionError:
@@ -457,7 +473,7 @@ class RPCKitten:
             sent = _w(self._HTTP_RESPONSE[code], self._HTTP_SORRY)
         except AttributeError:
             code = 404
-            sent = _w(self._HTTP_RESPONSE[code], self._HTTP_SORRY)
+            sent = _w(self._HTTP_RESPONSE[code], self._HTTP_NOT_FOUND)
         except (TypeError, UnicodeDecodeError) as e:
             code = 400
             sent = _w(
@@ -470,7 +486,7 @@ class RPCKitten:
                 self._HTTP_RESPONSE[code],
                 self._HTTP_JSON,
                 self._to_json({
-                    'message': str(e),
+                    'error': str(e),
                     'traceback': traceback.format_exc()}))
             self.exception('Error serving %s: %s', method, e)
         finally:
@@ -543,13 +559,13 @@ class RPCKitten:
             else:
                 return 500, bytes(mt, 'utf-8'), enc({'error': str(e)})
 
-    async def init_server(self, server):
+    async def init_servers(self, servers):
         """
         Subclasses can override this with initialization logic.
-        This function should return the (potentially modified) server
-        instance.
+        This function should return the (potentially modified) list of
+        server instances.
         """
-        return server
+        return servers
 
     async def _start_server(self):
         return await asyncio.start_server(self._serve_http,
@@ -560,11 +576,12 @@ class RPCKitten:
             path=self._unixfile)
 
     async def _main_httpd_loop(self):
-        self._server = await self.init_server(await self._start_server())
-        self._unix_server = await self._start_unix_server()
-        return await asyncio.gather(
-            self._server.serve_forever(),
-            self._unix_server.serve_forever())
+        if self.config.worker_use_tcp:
+            self._servers.append(await self._start_server())
+        if self.config.worker_use_unixdomain:
+            self._servers.append(await self._start_unix_server())
+        self._servers = await self.init_servers(self._servers)
+        return await asyncio.gather(*[s.serve_forever() for s in self._servers])
 
     def _make_server_socket(self):
         _sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -578,8 +595,15 @@ class RPCKitten:
         return _sock_desc, _sock
 
     def _make_url(self, host_port):
-        self._secret = str(b64encode(os.urandom(18), b'-_').strip(), 'utf-8')
-        return 'http://%s/%s' % (host_port, self._secret)
+        self._secret = self.config.worker_secret
+        if not self._secret:
+            secret = str(b64encode(os.urandom(18), b'-_').strip(), 'utf-8')
+            self._secret = secret
+        if self.config.worker_url_path:
+            path = '%s/' % self.config.worker_url_path.rstrip('/')
+        else:
+            path = ''
+        return 'http://%s/%s%s' % (host_port, path, self._secret)
 
     def _log_more(self, *ignored):
         pass  # FIXME
@@ -600,8 +624,10 @@ class RPCKitten:
     async def _url_connect(self, url):
         proto, _, host_port, path = url.split('/', 3)
 
-        if self._unixfile and self._peeraddr:
+        allow_unix = bool(self._peeraddr or not self.config.worker_use_tcp)
+        if self._unixfile and allow_unix:
             try:
+                self._peeraddr = self._unixfile
                 sock = await asyncio.open_unix_connection(self._unixfile)
                 return ('/' + path), True, sock
             except (FileNotFoundError, ConnectionRefusedError):
@@ -848,6 +874,16 @@ Content-Length: %d
             except (IOError, BrokenPipeError):
                 writer.close()
                 writer = None
+            except Exception as e:
+                data = enc({'error': str(e)})
+                if first:
+                    writer.write(self._HTTP_RESPONSE[500])
+                    writer.write(self._HTTP_MIMETYPE % bytes(mt, 'utf-8'))
+                    writer.write(data)
+                else:
+                    writer.write(self._HTTP_CHUNK_BEG % len(data))
+                    writer.write(data)
+                    writer.write(self._HTTP_CHUNK_END)
             finally:
                 if writer:
                     await writer.drain()
@@ -860,14 +896,19 @@ Content-Length: %d
 
         Check whether the microservice is running.
         """
-        if not isinstance(body, dict):
-            body = {}
+        if headers['_AUTHED']:
+            if not isinstance(body, dict):
+                body = {}
 
-        body['pong'] = True
-        body['conn'] = str_addr(writer._transport._sock.getsockname())
-        body['_format'] = 'Pong via %(conn)s!'
+            body['pong'] = True
+            body['conn'] = str_addr(writer._transport._sock.getsockname())
+            body['_format'] = 'Pong via %(conn)s!'
 
-        writer.write((self._HTTP_200_OK % bytes(mt, 'utf-8')) + enc(body))
+            writer.write((self._HTTP_200_OK % bytes(mt, 'utf-8')) + enc(body))
+        else:
+            # Not authed: do less work and don't let caller influence output
+            writer.write(self._HTTP_200_STATIC_PONG)
+
         await writer.drain()
         writer.close()
 
@@ -955,10 +996,13 @@ Content-Length: %d
         async def async_main(config, args):
             # FIXME: Allow options or environment variables that tweak
             #        how we instanciate the class here.
+            def _extract_bool_arg(args, arg):
+                val = (arg in args)
+                if val:
+                    args.remove(arg)
+                return val
 
-            print_json = ('--json' in args)
-            if print_json:
-                args.remove('--json')
+            print_json = _extract_bool_arg(args, '--json')
 
             self = cls(config)
             name = '%s/%s' % (config.app_name, self.name)
@@ -970,8 +1014,9 @@ Content-Length: %d
 
             if command == 'start':
                 await self.connect(auto_start=True)
-                sys.stderr.write(
-                    '%s: Running at %s\n' % (name, self._url))
+                if self._url:
+                    sys.stderr.write(
+                        '%s: Running at %s\n' % (name, self._url))
                 if self._unixfile and os.path.exists(self._unixfile):
                     sys.stderr.write(
                         '%s: Running at %s\n' % (name, self._unixfile))
@@ -1013,8 +1058,18 @@ Content-Length: %d
                 sys.stderr.write(
                     '%s: Not running: Start it first?\n' % self.name)
                 sys.exit(1)
-            except:
-                self.exception('%s %s failed', self.name, command)
+            except ValueError as e:
+                sys.stderr.write('%s %s failed: %s\n' % (self.name, command, e))
+                sys.exit(2)
+            except IOError as e:
+                sys.stderr.write('%s %s failed: %s\n' % (self.name, command, e))
+                sys.exit(3)
+            except PermissionError as e:
+                sys.stderr.write('%s %s failed: %s\n' % (self.name, command, e))
+                sys.exit(4)
+            except RuntimeError as e:
+                sys.stderr.write('%s %s failed: %s\n' % (self.name, command, e))
+                sys.exit(5)
 
         try:
             config = cls.Configuration()
