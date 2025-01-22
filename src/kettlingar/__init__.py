@@ -6,10 +6,7 @@ expose an HTTP/1.1 interface. The motivation was to solve the folowing
 two use cases:
 
   * split a complex application into multiple cooperating processes
-  * control, inspect and manage Python background services
-
-
-
+  * control, inspect and manage simple Python background services
 """
 from .rpckitten import RPCKitten, RPCKittenVarz
 from .__version__ import __version__

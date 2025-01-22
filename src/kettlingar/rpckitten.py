@@ -82,6 +82,9 @@ class RPCKitten:
                   b'Connection: close\n\n'
                   b'{"error": "Sorry"}\n')
 
+    COMMAND_KWARGS = {
+        'help': ['command']}
+
     class NotRunning(OSError):
         pass
 
@@ -241,6 +244,12 @@ class RPCKitten:
 
         self._init_convenience_methods()
         self._init_logging()
+
+    def command_kwargs(self):
+        cmd_kwargs = {}
+        for cls in reversed(self.__class__.__mro__):
+            cmd_kwargs.update(getattr(cls, 'COMMAND_KWARGS', {}))
+        return cmd_kwargs
 
     def __str__(self):
         return '%s on %s' % (
@@ -870,10 +879,10 @@ Content-Length: %d
 
     def _wrap_async_generator(self, api_method):
         # Use chunked encoding to render and yield multiple API results
-        async def raw_method(writer, mt, enc, method, headers, body, *args):
+        async def raw_method(writer, mt, enc, method, headers, body, *a):
             first = True
             try:
-                async for m, r in api_method(method, headers, body, *args):
+                async for m, r in api_method(method, headers, body, *a, **body):
                     mimetype, resp = m, r
                     if resp is None and mimetype is None:
                         return
@@ -985,11 +994,24 @@ Content-Length: %d
         return None, doc(None)
 
     @classmethod
-    def extract_kwargs(cls, args, allowed):
+    def extract_kwargs(cls, args, allowed=None):
+        """
+        This is a helper function which will convert --key=val arguments
+        found in the `args` list, into a dictionary of keys and values.
+        Only arguments in the allowed set (or list or tuple) will be
+        converted.
+
+        Returns a tuple of the remaining args, and the new keyword dict.
+
+        Example:
+
+            args = [1, 2, '--three=four', 4]
+            args, kwargs = RPCKitten.extract_kwargs(args, ['three'])
+        """
         is_arg = lambda a: isinstance(a, str) and a[:2] == '--'
         kwargs = dict(a[2:].split('=', 1) for a in args if is_arg(a))
         for k in kwargs:
-            if k not in allowed:
+            if allowed and k not in allowed:
                 raise ValueError('Unrecognized option: --%s' % k)
         return [a for a in args if not is_arg(a)], kwargs
 
@@ -1029,34 +1051,6 @@ Content-Length: %d
             name = '%s/%s' % (config.app_name, self.name)
             command = args.pop(0)
 
-            if command == 'help':
-                print((await self.api_help(None, None, None, *args))[1])
-                return
-
-            if command == 'start':
-                await self.connect(auto_start=True)
-                if self._url:
-                    sys.stderr.write(
-                        '%s: Running at %s\n' % (name, self._url))
-                if self._unixfile and os.path.exists(self._unixfile):
-                    sys.stderr.write(
-                        '%s: Running at %s\n' % (name, self._unixfile))
-                return os._exit(0)
-
-            if command == 'stop':
-                try:
-                    await self.connect(auto_start=False, retry=0)
-                    await self.quitquitquit()
-                    sys.stderr.write('%s: Stopped\n' % name)
-                except cls.NotRunning:
-                    sys.stderr.write('%s: Not running\n' % name)
-                return
-
-            if command == 'restart':
-                await async_main(config, ['stop'])
-                await async_main(config, ['start'])
-                return
-
             def _print_result(result):
                 if isinstance(result, dict) and '_format' in result:
                     fmt = result.pop('_format')
@@ -1068,13 +1062,47 @@ Content-Length: %d
                     print(fmt % result)
 
             try:
+                if args and command in ('start', 'stop', 'restart'):
+                    raise ValueError('invalid arguments: %s' % ' '.join(args))
+
+                args, kwargs = self.extract_kwargs(args,
+                    allowed=self.command_kwargs().get(command))
+
+                if command == 'help':
+                    _, result = await self.api_help(0, 0, 0, *args, **kwargs)
+                    return _print_result(result)
+
+                if command == 'start':
+                    await self.connect(auto_start=True)
+                    if self._url:
+                        print('%s: Running at %s' % (name, self._url))
+                    if self._unixfile and os.path.exists(self._unixfile):
+                        print('%s: Running at %s' % (name, self._unixfile))
+                    return os._exit(0)
+
+                if command == 'stop':
+                    try:
+                        await self.connect(auto_start=False, retry=0)
+                        await self.quitquitquit()
+                        print('%s: Stopped' % name)
+                    except cls.NotRunning:
+                        print('%s: Not running' % name)
+                    return
+
+                if command == 'restart':
+                    await async_main(config, ['stop'])
+                    await async_main(config, ['start'])
+                    return
+
                 await self.connect()
-                result = await self.call(command, *args)
+                result = await self.call(command, *args, **kwargs)
                 if inspect.isasyncgenfunction(result):
                     async for res in result():
                         _print_result(res)
+                    return
                 else:
-                    _print_result(result)
+                    return _print_result(result)
+
             except cls.NotRunning:
                 sys.stderr.write(
                     '%s: Not running: Start it first?\n' % self.name)

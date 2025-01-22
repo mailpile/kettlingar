@@ -3,32 +3,16 @@
   <p>RPC Kittens! Cute asyncio HTTP-RPC microservices for fun and profit.</p>
 </div>
 
-<p align="center">
-  <a href="https://github.com/mailpile/kettlingar/actions/workflows/main.yml">
-    <img src="https://github.com/mailpile/kettlingar/actions/workflows/main.yml/badge.svg" alt="Tests">
-  </a>
-  <a href="https://codecov.io/gh/mailpile/kettlingar">
-    <img src="https://codecov.io/gh/mailpile/kettlingar/branch/main/graph/badge.svg" alt="codecov">
-  </a>
-  <a href="https://github.com/psf/black">
-    <img src="https://img.shields.io/badge/code%20style-black-000000.svg" alt="black">
-  </a>
-  <a href="https://github.com/mailpile/kettlingar/blob/main/LICENSE">
-    <img src="https://img.shields.io/github/license/mailpile/kettlingar.svg" alt="license">
-  </a>
-</p>
-
-<p align="center">
-  <a href="https://github.com/codespaces/badge.svg)](https://codespaces.new/mailpile/kettlingar?template=false">
-    <img src="https://github.com/codespaces/badge.svg" alt="Open in GitHub Codespaces">
-  </a>
-</p>
-
 # What's this?
 
 Kettingar is a micro-framework for building Python microservices that
-expose an HTTP/1.1 interface. The motivation was to make it easy to
-split a complex application into multiple cooperating processes.
+expose an HTTP/1.1 interface. The motivation was to solve the folowing
+two use cases:
+
+- Split a complex application into multiple cooperating processes
+- Control, inspect and manage simple Python background services
+
+Some features:
 
 - Fully async
 - Authenticated and unauthenticated API methods
@@ -77,6 +61,7 @@ class MyKitten(RPCKitten):
     """
     class Configuration(RPCKitten.Configuration):
         APP_NAME = 'mykitten'
+        WORKER_NAME = 'Kitty'
 
     async def public_api_meow(self, method, headers, body):
         """
@@ -96,7 +81,7 @@ class MyKitten(RPCKitten):
         for i in range(0, int(count)):
             yield None, {
                 'purr': 'purr' * (i + 1),
-                '_format': 'Kitty says %(purr)s'}
+                '_format': '%s says %%(purr)s' % self.config.worker_name}
             await asyncio.sleep(1)
 
 
@@ -105,15 +90,15 @@ if __name__ == '__main__':
     MyKitten.Main(sys.argv[1:])
 ```
 
-This (or something very similar) can be found in the [examples](examples/)
-folder, and run like so:
+This (or something very similar) can be found in the
+[examples](examples/) folder, and run like so:
 
 ```bash
 $ python3 -m examples.kitten help
 ...
 
 $ python3 -m examples.kitten start --worker-listen-port=12345
-...python3 -m examples.kitten ping
+...
 
 $ python3 -m examples.kitten ping
 Pong via /path/to/mykitten/worker.sock!
@@ -123,18 +108,29 @@ $ python3 -m examples.kitten meow
 
 $ curl http://127.0.0.1:12345/meow
 Meow world, meow
-
-
 ```
 
 This is an app that uses the microservice:
 
 ```python
-from mykitten import MyKitten
+import asyncio
+import sys
 
-kitty = MyKitten().connect(auto_start=True)
+from .kitten import MyKitten
 
-print('Result: %s' % kitty.sync_call('meow'))
+
+async def test_function():
+    kitty = await MyKitten(args=sys.argv[1:]).connect(auto_start=True)
+
+    print('%s' % kitty)
+    print('Our first meow: %s' % (await kitty.meow()))
+
+    async for result in kitty.purr(10):
+        print(result['purr'])
+
+    await kitty.quitquitquit()
+
+asyncio.run(test_function())
 ```
 
 # Development
@@ -182,15 +178,20 @@ Please make sure to update tests as appropriate and follow the existing coding s
 
 # Kettlingar? Huh?
 
-Kettlingar means "kittens" in Icelandic. This is a spin-off project from
-[moggie](https://github.com/mailpile/moggie/) (a moggie is a cat) and the
-author is Icelandic.
+Kettlingar means "kittens" in Icelandic.
+This is a spin-off project from
+[moggie](https://github.com/mailpile/moggie/) (a moggie is a cat)
+and the author is Icelandic.
 
 
 # License and Credits
 
 [MIT](https://choosealicense.com/licenses/mit/), have fun!
 
-Created by Bjarni R. Einarsson for use with moggie and other things besides.
+Created by [Bjarni R. Einarsson](https://github.com/BjarniRunar)
+for use with
+[moggie](https://github.com/mailpile/moggie/)
+and probably some other things besides.
 
-Thanks to ... for the handy Python project template!
+Thanks to Aniket Maurya for the
+[handy Python project template](https://github.com/aniketmaurya/python-project-template).

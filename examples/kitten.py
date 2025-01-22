@@ -9,6 +9,10 @@ class MyKitten(RPCKitten, RPCKittenVarz):
     This microservice knows how to meow and how to purr. Purring is
     private and requires authentication, and may go on for a while.
     """
+
+    COMMAND_KWARGS = {
+        'purr': ['purr', 'count']}
+
     class Configuration(RPCKitten.Configuration):
         APP_NAME = 'mykitten'
         WORKER_NAME = 'Kitty'
@@ -19,7 +23,7 @@ class MyKitten(RPCKitten, RPCKittenVarz):
         """
         return 'text/plain', 'Meow world, meow!\n'
 
-    async def api_purr(self, method, headers, body, count):
+    async def api_purr(self, method, headers, body, count=1, purr='purr'):
         """
         Authenticated endpoint taking a single argument. The response
         will be encoded as JSON or using msgpack, depending on what the
@@ -30,7 +34,7 @@ class MyKitten(RPCKitten, RPCKittenVarz):
         """
         for i in range(0, int(count)):
             yield None, {
-                'purr': 'purr' * (i + 1),
+                'purr': purr * (i + 1),
                 '_format': '%s says %%(purr)s' % self.config.worker_name}
             await asyncio.sleep(1)
 
