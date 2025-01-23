@@ -48,6 +48,7 @@ class RPCKitten:
     """
     _MAGIC_FD = '_FD_BRE_MAGIC_'
     _MAGIC_SOCK = '_SO_BRE_MAGIC_'
+    FDS_MIMETYPE = 'application/x-fd-magic'
 
     _HTTP_200_OK = (b'HTTP/1.1 200 OK\n'
                    b'Content-Type: %s\n'
@@ -246,7 +247,7 @@ class RPCKitten:
         for prefix in ('public_api_', 'public_raw_', 'api_', 'raw_'):
             try:
                 info = inspect.getfullargspec(getattr(self, prefix+command))
-                return info.args[-len(info.defaults):]
+                return info.args[-len(info.defaults or ''):]
             except AttributeError:
                 pass
         return []
@@ -493,6 +494,16 @@ class RPCKitten:
             if mimetype is None and response is None:
                 sent = '-'
                 writer = None
+            elif str(mimetype, 'utf-8') == self.FDS_MIMETYPE:
+                if not isinstance(response, list):
+                    response = [response]
+
+                fd_list = [r.fileno() for r in response]
+                http_res = (
+                    self._HTTP_200_OK % b'application/json' +
+                    self._to_json([self._fd_to_magic_arg(a) for a in response]))
+
+                await self._send_data_and_fds(writer, http_res, fd_list)
             else:
                 l1 = (self._HTTP_RESPONSE.get(code) or
                     (self._HTTP_RESPONSE_UNKNOWN % code))
@@ -537,6 +548,8 @@ class RPCKitten:
 
     async def _handle_http_request(self,
             authed, writer, method, path, headers, body, fds):
+        def _b(v):
+            return v if isinstance(v, bytes) else bytes(v, 'utf-8')
 
         if authed:
             raw_method = getattr(self, 'raw_' + path[1:], None)
@@ -580,14 +593,14 @@ class RPCKitten:
             if not mimetype:
                 mimetype, resp = mt, enc(resp)
 
-            return 200, bytes(mimetype, 'utf-8'), resp
+            return 200, _b(mimetype), resp
         except Exception as e:
             if authed:
-                return 500, bytes(mt, 'utf-8'), enc({
+                return 500, _b(mt), enc({
                     'error': str(e),
                     'traceback': traceback.format_exc()})
             else:
-                return 500, bytes(mt, 'utf-8'), enc({'error': str(e)})
+                return 500, _b(mt), enc({'error': str(e)})
 
     async def init_servers(self, servers):
         """
@@ -784,7 +797,9 @@ Content-Length: %d
 
             chunked, resp_code, body, result = False, 500, b'', {}
             try:
-                head, hdrs, body, rfds = await self._http11(reader, writer)
+                head, hdrs, body, rfds = await self._http11(reader, writer,
+                    fds=fds_ok)
+
                 resp_code = int(head.split(None, 2)[1])
                 chunked = (hdrs.get('Transfer-Encoding') == 'chunked')
                 if body and not chunked:
@@ -795,13 +810,19 @@ Content-Length: %d
                         result = self._from_json(body)
                     else:
                         result = {'mimetype': ctype, 'data': body}
+                if rfds:
+                    result = [
+                        self._fd_from_magic_arg(a, rfds)
+                        for a in result]
             except IOError as e:
                 result = {'error': 'Read failed: %s' % e}
             except Exception as e:
                 if not body:
                     result = {'error': 'Empty response body'}
                 else:
-                    result = {'error': 'Failed to unpack %s: %s' % (body, e)}
+                    result = {
+                        'error': 'Failed to unpack %s: %s' % (body, e),
+                        'traceback': traceback.format_exc()}
 
             if resp_code == 200:
                 if 'error' not in result:
@@ -818,6 +839,8 @@ Content-Length: %d
             elif 400 <= resp_code < 500:
                 exc = ValueError
 
+            if 'traceback' in result:
+                self.error('Remote %s', result['traceback'])
             raise exc('HTTP %d: %s' % (resp_code, result.get('error')))
         finally:
             rtime = 1000 * (time.time() - t0)
