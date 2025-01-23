@@ -82,9 +82,6 @@ class RPCKitten:
                   b'Connection: close\n\n'
                   b'{"error": "Sorry"}\n')
 
-    COMMAND_KWARGS = {
-        'help': ['command']}
-
     class NotRunning(OSError):
         pass
 
@@ -245,11 +242,14 @@ class RPCKitten:
         self._init_convenience_methods()
         self._init_logging()
 
-    def command_kwargs(self):
-        cmd_kwargs = {}
-        for cls in reversed(self.__class__.__mro__):
-            cmd_kwargs.update(getattr(cls, 'COMMAND_KWARGS', {}))
-        return cmd_kwargs
+    def _command_kwargs(self, command):
+        for prefix in ('public_api_', 'public_raw_', 'api_', 'raw_'):
+            try:
+                info = inspect.getfullargspec(getattr(self, prefix+command))
+                return info.args[-len(info.defaults):]
+            except AttributeError:
+                pass
+        return []
 
     def __str__(self):
         return '%s on %s' % (
@@ -1077,7 +1077,7 @@ Content-Length: %d
                     raise ValueError('invalid arguments: %s' % ' '.join(args))
 
                 args, kwargs = self.extract_kwargs(args,
-                    allowed=self.command_kwargs().get(command))
+                    allowed=self._command_kwargs(command))
 
                 if command == 'help':
                     _, result = await self.api_help(0, 0, 0, *args, **kwargs)
