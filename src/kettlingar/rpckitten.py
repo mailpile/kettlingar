@@ -471,11 +471,15 @@ class RPCKitten:
             writer.write(data)
             return len(data)
 
+        fds_ok = False
         method = path = version = ''
         try:
             head, hdrs, body, fds = await self._http11(reader, writer, fds=True)
             method, path, version = head.split(None, 3)[:3]
-            peer = writer._transport._sock.getpeername() or ['unix-domain']
+            peer = writer._transport._sock.getpeername()
+            if not peer:
+                peer = ['unix-domain']
+                fds_ok = True
 
             try:
                 if self.config.worker_url_path:
@@ -495,6 +499,8 @@ class RPCKitten:
                 sent = '-'
                 writer = None
             elif str(mimetype, 'utf-8') == self.FDS_MIMETYPE:
+                if not fds_ok:
+                    raise ValueError('Cannot send file descriptors over TCP')
                 if not isinstance(response, list):
                     response = [response]
 
@@ -693,8 +699,6 @@ class RPCKitten:
             else:
                 extras = []
             return sock.sendmsg([data], extras)
-        except:
-            self.exception('%s.sendmsg(..., fds=%s)', sock, fds)
         finally:
             sock.setblocking(0)
         return 0
@@ -787,6 +791,8 @@ Content-Length: %d
 """ % (url_path, len(payload)), 'utf-8') + payload
 
         try:
+            chunked, resp_code, body, result = False, 500, b'', {}
+
             if fds:
                 if not fds_ok:
                     raise ValueError('Cannot send file descriptors over TCP')
@@ -795,7 +801,6 @@ Content-Length: %d
                 writer.write(http_req)
                 await writer.drain()
 
-            chunked, resp_code, body, result = False, 500, b'', {}
             try:
                 head, hdrs, body, rfds = await self._http11(reader, writer,
                     fds=fds_ok)
@@ -825,7 +830,7 @@ Content-Length: %d
                         'traceback': traceback.format_exc()}
 
             if resp_code == 200:
-                if 'error' not in result:
+                if (not isinstance(result, dict)) or ('error' not in result):
                     if chunked:
                         return self._chunk_decoder(reader, hdrs, body, rfds)
                     return result
