@@ -22,6 +22,8 @@ Some features:
 - Serve over TCP/IP and over a local unix domain socket
 - Built in CLI for starting/stopping/interacting with the service
 
+See below for a bit more discussion about these features.
+
 
 # Installation
 
@@ -43,7 +45,9 @@ pip install -e ".[dev]"
 
 ## Usage
 
-See the [`examples/`](./examples/) folder for helpful code snippets.
+See the [`examples/`](./examples/)
+for fully documented versions of the snippets below,
+as well as other helpful examples.
 
 This is a kettlingar microservice named MyKitten:
 
@@ -54,34 +58,25 @@ from kettlingar import RPCKitten
 
 
 class MyKitten(RPCKitten):
-    """mykitten - A sample kettlingar microservice
-
-    This microservice knows how to meow and how to purr. Purring is
-    private and requires authentication, and may go on for a while.
-    """
     class Configuration(RPCKitten.Configuration):
         APP_NAME = 'mykitten'
         WORKER_NAME = 'Kitty'
 
     async def public_api_meow(self, method, headers, body):
-        """
-        This endpoint requires no authentication!
-        """
-        return 'text/plain', 'Meow world, meow!\n'
+        return (
+            'text/plain',           # Fixed MIME type of `text/plain`
+            'Meow world, meow!\n')  # Meow!
 
-    async def api_purr(self, method, headers, body, count):
-        """
-        Authenticated endpoint taking a single argument. The response
-        will be encoded as JSON or using msgpack, depending on what the
-        caller requested.
-
-        The generated convenience function, MyKitten.purr() will be an
-        async generator yielding results as they are sent over the wire.
-        """
+    async def api_purr(self, method, headers, body, count=1, purr='purr'):
+        _format = self.config.worker_name + ' says %(purr)s'
         for i in range(0, int(count)):
-            yield None, {
-                'purr': 'purr' * (i + 1),
-                '_format': '%s says %%(purr)s' % self.config.worker_name}
+            result = {
+                'purr': purr * (i + 1),  # Purring!
+                '_format': _format}      # Formatting rule for CLI interface
+
+            yield (
+                None,                    # No MIME-type, let framework choose
+                result)                  # Result object
             await asyncio.sleep(1)
 
 
@@ -132,6 +127,55 @@ async def test_function():
 
 asyncio.run(test_function())
 ```
+
+# Is this a web server?
+
+Kinda.
+Kettlingar implements a subset of the HTTP/1.1 specification.
+
+This allows us to use tools like `curl` or even a web browser for debugging and should facilitate use of non-Python clients.
+But the emphasis was on simplicity (and hopefully performance),
+rather than a complete implementation.
+
+
+# Access controls
+
+A `kettlingar` microservice offers two levels of access control:
+
+- "Public", or unauthenticated methods
+- Private methods
+
+Access to private methods is granted by checking for a special token's presence anywhere in the HTTP header.
+The common case is for the token to be included in the path part of the HTTP URL,
+but you can use any (standard or made up) HTTP header if you prefer.
+
+In the case where the client is running on the same machine,
+and is running using the same user-id as the microservice,
+credentials (and the unix domain socket, if it exists)
+are automatically found at a well defined location in the user's home directory.
+Access to them is restricted using Unix file system permissions.
+
+
+# Unix domain sockets and passing file descriptors
+
+A `kettlingar` microservice will by default listen on both a TCP/IP socket,
+and a unix domain socket.
+Processes located on the same machine should the unix domain socket by default.
+
+This theoretically has lower overhead (better performance),
+but also allows the microservice to send and receive open file descriptors
+(see [filecat.py](examples/filecat.py) and
+[test_filecat.py](examples/test_filecat.py) for a demo).
+
+This can be used in a few ways:
+
+- One process can listen for incoming TCP/IP client connections,
+  and then pass the connection to a worker process to finish the job.
+- Seamless upgrades of running servers;
+  a graceful shutdown command could send all open sockets/file descriptors to the replacement process before terminating.
+
+It's also just neat and I wanted to play with it!
+
 
 # Development
 
