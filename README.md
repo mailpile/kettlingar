@@ -25,6 +25,24 @@ Some features:
 See below for a bit more discussion about these features.
 
 
+# Status / TODO:
+
+Status: Useful!
+
+TODO:
+
+- Extend `help` to list defined API methods
+- Write automated tests
+- Use type hinting for fun and profit
+- Improve and document how we do logging
+- Improve and document varz and internal stats
+- Improve and document how to extend JSON/msgpack for custom data types
+- Document the `public_raw_` and `raw_` magic prefixes
+- Document error handling / exception propogation
+
+If you think you can help with any of those, feel free to ping me!
+
+
 # Installation
 
 ## From Source
@@ -69,14 +87,17 @@ class MyKitten(RPCKitten):
 
     async def api_purr(self, method, headers, body, count=1, purr='purr'):
         _format = self.config.worker_name + ' says %(purr)s'
-        for i in range(0, int(count)):
+
+        count = int(count)              # CLI users will send us strings
+
+        for i in range(count):
             result = {
-                'purr': purr * (i + 1),  # Purring!
-                '_format': _format}      # Formatting rule for CLI interface
+                'purr': purr * (i + 1), # Purring!
+                '_format': _format}     # Formatting rule for CLI interface
 
             yield (
-                None,                    # No MIME-type, let framework choose
-                result)                  # Result object
+                None,                   # No MIME-type, let framework choose
+                result)                 # Result object
             await asyncio.sleep(1)
 
 
@@ -235,16 +256,16 @@ a) the names of the microservice configuration variables and
 b) their default values.
 
 For each `VARIABLE_NAME` defined in the configuration class,
-the instanciated configuration objects will have a `variable_name` attribute with the current setting.
+the instanciated configuration objects will have a `variable_name` (lower-case) attribute with the current setting.
 This can be accessed from within API methods as `self.config.variable_name`.
 The value can be set on the command-line
-(when starting the service) using an argument `--variable-name=value`.
+(when starting the service) by passing an argument `--variable-name=value`.
 
 Examples:
 
 ```bash
 ## Tweak the configuration on the command-line
-$ python3 -m examples.kitten start --app-name=dog --worker-name=spot
+$ python3 -m examples.kitten start --app-name=Doggos --worker-name=Spot
 ...
 
 ## Load settings from a file
@@ -258,6 +279,25 @@ $ python3 -m examples.kitten config --json
 
 Note that the `app_name` and `worker_name` settings influence the location of the authentication files (see **Access controls** above),
 so changing either one will allow you to run multiple instances of the same microservice side-by-side.
+
+## API functions as CLI commands
+
+The arguments and keyword arguments specified on the `api_*` functions translate in the "obvious" way to the command-line:
+positional arguments are positional,
+keyword arguments can be specified using `--key=val`.
+
+Example:
+
+```bash
+$ python3 -m examples.kitten purr 2 --purr=rarr
+Kitty says rarr
+Kitty says rarrrarr
+```
+
+Note that if you expect to use your microservice from the command line,
+you will need to handle any type conversions (from string representations) yourself within the function.
+A future version of `kettlingar` might be able to infer conversions from Python type hints,
+but that hasn't yet been implemented.
 
 
 # Unix domain sockets and passing file descriptors

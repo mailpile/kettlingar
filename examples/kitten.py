@@ -35,7 +35,8 @@ class MyKitten(RPCKitten):
         be an async generator yielding results as they are received.
         """
         _format = self.config.worker_name + ' says %(purr)s'
-        for i in range(0, int(count)):
+        count = int(count)               # CLI users send strings
+        for i in range(count):
             result = {
                 'purr': purr * (i + 1),  # Purring!
                 '_format': _format}      # Formatting rule for CLI interface
