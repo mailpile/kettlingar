@@ -20,7 +20,7 @@ Some features:
 - Supports passing open file descriptors to or from the microservice
 - Supports msgpack (preferred) or JSON for RPC request/response
 - Serve over TCP/IP and over a local unix domain socket
-- Built in CLI for starting/stopping/interacting with the service
+- Built in CLI for configuring, running and interacting with the service
 
 See below for a bit more discussion about these features.
 
@@ -128,6 +128,58 @@ async def test_function():
 asyncio.run(test_function())
 ```
 
+# Writing API endpoints
+
+As illustrated above,
+an API endpoint is simply a Python function named using one of the following prefixes:
+`public_api_`, or `api_` -
+to understand the difference between them, see **Access controls** below.
+
+These functions must always take at least three positional arguments
+(`method`, `headers`, `body`),
+and must either return a single tuple of `(mime-type, data)`,
+or implement a generator which yields such tuples.
+
+The functions should also have docstrings which explain what they do and how to use them.
+
+The functions can access (or modify!) the microservice configuration,
+as `self.config.*` (see below for details).
+
+That's all;
+`kettlingar` will automatically:
+- define HTTP/1.1 paths within the microservice for each method,
+- create Pythonic client functions which send requests to the microservice and deserialize the responses, and
+- create a command-line (CLI) interface for asking for `help` or invoking the function directly
+
+Note that `kettlingar` microservices are single-threaded,
+but achieve concurrency using `asyncio`.
+Any API method could block the entire service,
+so write them carefully!
+
+
+## How does it work?
+
+In the above example,
+`kettlingar` uses introspection (the `inspect` module) to auto-generate client functions for each of the two API methods:
+`MyKitten.meow()` and
+`MyKitten.purr()`.
+
+When invoked,
+each client function will use `MyKitten.call()`
+and then either return the result directly or implement a generator.
+
+Digging even deeper,
+`MyKitten.call()` makes an HTTP/1.1 POST request to the running microservice,
+using `msgpack` to bundle up all the arguments and deserialized the response.
+
+(JSON is also supported for interfacing with humans or systems lacking `msgpack`.)
+
+In the case of the generator function,
+the HTTP response uses
+[chunked encoding](https://en.wikipedia.org/wiki/Chunked_transfer_encoding),
+with one chunk per yielded purr.
+
+
 # Is this a web server?
 
 Kinda.
@@ -156,11 +208,63 @@ are automatically found at a well defined location in the user's home directory.
 Access to them is restricted using Unix file system permissions.
 
 
+# Configuration and the command line
+
+The `kettlingar` command-line interface aims to solve these tasks:
+
+- Administering the microservice (start, stop, get help)
+- Configuring the microservice (including defining a config file format)
+- Running functions on the microservice (testing, or real use from the shell)
+
+## Administration
+
+A `kettlingar` microservice will out-of-the-box support these CLI commands:
+
+- `start` - Start the microservice (if it isn't already running)
+- `stop` - Stop the microservice
+- `restart` - Stop and Start
+- `ping` - Check whether the microservice is running
+- `help` - Get help on which commands exist and how to use them
+- `config` - Display the configuration of the running microservice
+
+## Configuration
+
+Each `RPCKitten` subclass contains a `Configuration` class which defines a set of capitalized constants in all-caps.
+This defines
+a) the names of the microservice configuration variables and
+b) their default values.
+
+For each `VARIABLE_NAME` defined in the configuration class,
+the instanciated configuration objects will have a `variable_name` attribute with the current setting.
+This can be accessed from within API methods as `self.config.variable_name`.
+The value can be set on the command-line
+(when starting the service) using an argument `--variable-name=value`.
+
+Examples:
+
+```bash
+## Tweak the configuration on the command-line
+$ python3 -m examples.kitten start --app-name=dog --worker-name=spot
+...
+
+## Load settings from a file
+$ python3 -m examples.kitten start --worker-config=examples/kitten.cfg
+...
+
+## View the current configuration as JSON
+$ python3 -m examples.kitten config --json
+...
+```
+
+Note that the `app_name` and `worker_name` settings influence the location of the authentication files (see **Access controls** above),
+so changing either one will allow you to run multiple instances of the same microservice side-by-side.
+
+
 # Unix domain sockets and passing file descriptors
 
 A `kettlingar` microservice will by default listen on both a TCP/IP socket,
 and a unix domain socket.
-Processes located on the same machine should the unix domain socket by default.
+Processes located on the same machine should use the unix domain socket by default.
 
 This theoretically has lower overhead (better performance),
 but also allows the microservice to send and receive open file descriptors

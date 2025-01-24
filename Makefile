@@ -1,11 +1,11 @@
 build-docs:
 	cp README.md docs/index.md
 
-docsserve:
-	mkdocs serve
+docsserve: venv venv/bin/mkdocs
+	. venv/bin/activate; mkdocs serve
 
-test:
-	pytest
+test: venv venv/bin/mkdocs
+	. venv/bin/activate; pytest
 
 coverage:  ## Run tests with coverage
 	coverage erase
@@ -21,20 +21,28 @@ clean:
 	find . | grep -E ".ipynb_checkpoints" | xargs rm -rf
 	rm -f .coverage
 
-style:
-	isort --profile black .
-	ruff format .
+style: venv venv/bin/mkdocs
+	. venv/bin/activate; isort --profile black .
+	. venv/bin/activate; ruff format .
 
 push:
 	git push && git push --tags
 
 build:
-	python -m build --wheel
+	. venv/bin/activate; pip build --wheel
 
 publish-test:
-		$(style clean build)
-		twine upload -r testpypi dist/*
+	$(style clean build)
+	twine upload -r testpypi dist/*
 
 publish-prod:
-		$(style clean build)
-		twine upload dist/*
+	$(style clean build)
+	twine upload dist/*
+
+venv:
+	python3 -m venv venv
+	. venv/bin/activate; pip install -e .
+
+venv/bin/mkdocs:
+	. venv/bin/activate; pip install -e .\[dev]
+
