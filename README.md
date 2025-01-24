@@ -250,7 +250,7 @@ A `kettlingar` microservice will out-of-the-box support these CLI commands:
 
 ## Configuration
 
-Each `RPCKitten` subclass contains a `Configuration` class which defines a set of capitalized constants in all-caps.
+Each `RPCKitten` subclass contains a `Configuration` class which defines a set of constants in all-caps.
 This defines
 a) the names of the microservice configuration variables and
 b) their default values.
