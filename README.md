@@ -31,7 +31,6 @@ Status: Useful!
 
 TODO:
 
-- Extend `help` to list defined API methods
 - Write automated tests
 - Use type hinting for fun and profit
 - Improve and document how we do logging

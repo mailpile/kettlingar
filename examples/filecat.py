@@ -10,13 +10,15 @@ class FileCat(RPCKitten):
         WORKER_NAME = 'milton'
 
     async def api_cat(self, method, headers, body, fd):
-        """
+        """/cat <fd>
+
         Returns the output read from an open file descriptor.
         """
         return None, fd.read()
 
     async def api_read(self, method, headers, body, path):
-        """
+        """/read <path>
+
         Returns a file descriptor opened for reading.
         """
         return self.FDS_MIMETYPE, open(path, 'rb')

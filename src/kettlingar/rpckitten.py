@@ -243,14 +243,36 @@ class RPCKitten:
         self._init_convenience_methods()
         self._init_logging()
 
-    def _command_kwargs(self, command):
+    def _command_fullargspec(self, command):
         for prefix in ('public_api_', 'public_raw_', 'api_', 'raw_'):
             try:
-                info = inspect.getfullargspec(getattr(self, prefix+command))
-                return info.args[-len(info.defaults or ''):]
+                return inspect.getfullargspec(getattr(self, prefix+command))
             except AttributeError:
                 pass
+        raise ValueError('No such command: %s' % command)
+
+    def _command_kwargs(self, command):
+        try:
+            info = self._command_fullargspec(command)
+            if info.varkw:
+                return []
+            return info.args[-len(info.defaults or ''):] + info.kwonlyargs
+        except ValueError:
+            pass
         return []
+
+    def _all_commands(self):
+        found = {}
+        for key in dir(self):
+             for prefix in ('public_api_', 'public_raw_', 'api_', 'raw_'):
+                 if key.startswith(prefix):
+                     try:
+                         func = getattr(self, key)
+                         name = key[len(prefix):]
+                         found[name] = (func, inspect.getfullargspec(func))
+                     except TypeError:
+                         pass
+        return found
 
     def __str__(self):
         return '%s on %s' % (
@@ -956,7 +978,8 @@ Content-Length: %d
         """
         return headers['_AUTHED']
 
-    async def public_raw_ping(self, writer, mt, enc, method, headers, body):
+    async def public_raw_ping(self, writer, mt, enc, method, headers, body,
+            **kwa):
         """/ping
 
         Check whether the microservice is running.
@@ -1012,6 +1035,21 @@ Content-Length: %d
 
         if not command:
             main_doc = doc(self.Main).replace('rpckitten', self.config.app_name)
+
+            commands = self._all_commands()
+            cmd_list = ['API Commands: ']
+            first = True
+            for command in sorted(list(commands.keys())):
+                if command in ('ping', 'help', 'config', 'quitquitquit'):
+                    continue
+                if len(cmd_list[-1]) + len(command) > 75:
+                    cmd_list.append('   ')
+                elif not first:
+                    cmd_list[-1] += ', '
+                cmd_list[-1] += command
+                first = False
+            main_doc = main_doc.replace('__API_COMMANDS__', '\n'.join(cmd_list))
+
             return None, doc(self) +'\n'+ main_doc
 
         api_command = getattr(self, 'api_' + command, None)
@@ -1056,18 +1094,26 @@ Content-Length: %d
 
     @classmethod
     def Main(cls, args):
-        """Usage: rpckitten <command> [--json] [<args ...>]
+        """Usage: rpckitten <command> [--json|--raw] [<args ...>]
 
     Commands:
 
-        start   - Start the background service
-        stop    - Stop the background service
-        restart - Stop and Start!
+        config          - Display the current configuration
+        help <command>  - Get help about a rpckitten commands
+        ping            - Check whether rpckitten is running
+        start           - Start the background service
+        stop            - Stop the background service
+        restart         - Stop and Start!
 
-    You can also treat any API method as a command and invoke it
-    from the command line.
+    __API_COMMANDS__
 
-    Example: rpckitten ping --json
+    You can also treat any API method as a command and invoke it from
+    the command line. Add --json or --raw to alter whether/how the
+    output gets formatted.
+
+    Examples:
+        rpckitten ping --json
+        rpckitten help ping
         """
         if not args:
             print(cls.__doc__.strip().replace('\n    ', '\n'))
@@ -1076,8 +1122,6 @@ Content-Length: %d
             sys.exit(1)
 
         async def async_main(config, args):
-            # FIXME: Allow options or environment variables that tweak
-            #        how we instanciate the class here.
             def _extract_bool_arg(args, arg):
                 val = (arg in args)
                 if val:
@@ -1085,6 +1129,7 @@ Content-Length: %d
                 return val
 
             print_json = _extract_bool_arg(args, '--json')
+            print_raw = _extract_bool_arg(args, '--raw')
 
             self = cls(config)
             name = '%s/%s' % (config.app_name, self.name)
@@ -1095,8 +1140,10 @@ Content-Length: %d
                     fmt = result.pop('_format')
                 else:
                     fmt = '%s'
-                if print_json:
-                    print(json.dumps(result))
+                if print_raw:
+                    print('%s' % result)
+                elif print_json:
+                    print(str(self._to_json(result), 'utf-8'))
                 else:
                     print(fmt % result)
 
@@ -1160,8 +1207,11 @@ Content-Length: %d
                 sys.exit(5)
 
         try:
+            # FIXME: Allow options or environment variables that tweak
+            #        how we instanciate the class here.
             config = cls.Configuration()
-            task = async_main(config, config.configure(list(args), strict=False))
+            args = config.configure(list(args), strict=False)
+            task = async_main(config, args)
         except:
             traceback.print_exc()
 

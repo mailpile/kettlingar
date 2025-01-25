@@ -14,7 +14,8 @@ class MyKitten(RPCKitten):
         WORKER_NAME = 'Kitty'
 
     async def public_api_meow(self, method, headers, body):
-        """
+        """/meow
+
         This endpoint requires no authentication!
 
         This endpoint returns `text/plain` content, which will either be
@@ -26,7 +27,8 @@ class MyKitten(RPCKitten):
             'Meow world, meow!\n')  # Meow!
 
     async def api_purr(self, method, headers, body, count=1, purr='purr'):
-        """
+        """/purr [--count=<N>] [--purr=<sound>]
+
         Authenticated endpoint taking a single argument. The response
         will be encoded as JSON or using msgpack, depending on what the
         caller requested.
