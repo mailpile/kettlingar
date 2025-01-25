@@ -529,7 +529,7 @@ class RPCKitten:
                 fd_list = [r.fileno() for r in response]
                 http_res = (
                     self._HTTP_200_OK % b'application/json' +
-                    self._to_json([self._fd_to_magic_arg(a) for a in response]))
+                    self.to_json([self._fd_to_magic_arg(a) for a in response]))
 
                 await self._send_data_and_fds(writer, http_res, fd_list)
             else:
@@ -548,13 +548,13 @@ class RPCKitten:
             sent = _w(
                 self._HTTP_RESPONSE[code],
                 self._HTTP_JSON,
-                self._to_json({'error': str(e)}))
+                self.to_json({'error': str(e)}))
         except Exception as e:
             code = 500
             sent = _w(
                 self._HTTP_RESPONSE[code],
                 self._HTTP_JSON,
-                self._to_json({
+                self.to_json({
                     'error': str(e),
                     'traceback': traceback.format_exc()}))
             self.exception('Error serving %s: %s', method, e)
@@ -595,14 +595,14 @@ class RPCKitten:
             raise (AttributeError if authed else PermissionError)(path)
 
         args = []
-        mt, enc = 'application/json', self._to_json
+        mt, enc = 'application/json', self.to_json
         if method == 'POST':
             if headers['Content-Type'] == 'application/x-msgpack':
-                mt, enc = 'application/x-msgpack', self._to_msgpack
-                body = self._from_msgpack(body)
+                mt, enc = 'application/x-msgpack', self.to_msgpack
+                body = self.from_msgpack(body)
                 args = body.pop('_args', [])
             elif headers['Content-Type'] == 'application/json':
-                body = self._from_json(body)
+                body = self.from_json(body)
                 args = body.pop('_args', [])
 
         if fds:
@@ -679,16 +679,36 @@ class RPCKitten:
     def _log_more(self, *ignored):
         pass  # FIXME
 
-    def _to_json(self, data):
+    def to_json(self, data):
+        """
+        Serializes the data to JSON, returning the generated JSON as bytes.
+
+        Override this if you need de/serialization for app-specific data.
+        """
         return bytes(json.dumps(data) + '\n', 'utf-8')
 
-    def _from_json(self, jd):
+    def from_json(self, jd):
+        """
+        Deserializes data from JSON.
+
+        Override this if you need de/serialization for app-specific data.
+        """
         return json.loads(jd if isinstance(jd, str) else str(jd, 'utf-8'))
 
-    def _to_msgpack(self, data):
+    def to_msgpack(self, data):
+        """
+        Serializes the data to msgpack, returning the packed data as bytes.
+
+        Override this if you need de/serialization for app-specific data.
+        """
         return msgpack.packb(data)
 
-    def _from_msgpack(self, d):
+    def from_msgpack(self, d):
+        """
+        Deserializes data from msgpack.
+
+        Override this if you need de/serialization for app-specific data.
+        """
         return msgpack.unpackb(
             d if isinstance(d, (bytes, bytearray)) else bytes(d, 'latin-1'))
 
@@ -803,7 +823,7 @@ class RPCKitten:
 
         fds = [a.fileno() for a in args if hasattr(a, 'fileno')]
         kwargs['_args'] = [self._fd_to_magic_arg(a) for a in args]
-        payload = self._to_msgpack(kwargs or {})
+        payload = self.to_msgpack(kwargs or {})
         http_req = bytes("""\
 POST %s HTTP/1.1
 Connection: close
@@ -832,9 +852,9 @@ Content-Length: %d
                 if body and not chunked:
                     ctype = hdrs['Content-Type']
                     if ctype == 'application/x-msgpack':
-                        result = self._from_msgpack(body)
+                        result = self.from_msgpack(body)
                     elif ctype == 'application/json':
-                        result = self._from_json(body)
+                        result = self.from_json(body)
                     else:
                         result = {'mimetype': ctype, 'data': body}
                 if rfds:
@@ -901,9 +921,9 @@ Content-Length: %d
     def _chunk_decoder(self, reader, hdrs, buffer, rfds):
         ctype = hdrs['Content-Type']
         if ctype == 'application/x-msgpack':
-            decode = self._from_msgpack
+            decode = self.from_msgpack
         elif ctype == 'application/json':
-            decode = self._from_json
+            decode = self.from_json
         else:
             decode = lambda v: v
 
@@ -1143,7 +1163,7 @@ Content-Length: %d
                 if print_raw:
                     print('%s' % result)
                 elif print_json:
-                    print(str(self._to_json(result), 'utf-8'))
+                    print(str(self.to_json(result), 'utf-8'))
                 else:
                     print(fmt % result)
 

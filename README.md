@@ -35,9 +35,9 @@ TODO:
 - Use type hinting for fun and profit
 - Improve and document how we do logging
 - Improve and document varz and internal stats
-- Improve and document how to extend JSON/msgpack for custom data types
 - Document the `public_raw_` and `raw_` magic prefixes
 - Document error handling / exception propogation
+- Add websocket support
 
 If you think you can help with any of those, feel free to ping me!
 
