@@ -83,7 +83,7 @@ class RPCKitten:
     REPLY_TO_FIRST_FD = 'reply_to_first_fd'
 
     CALL_USE_JSON = 'call_use_json'
-    CALL_REPLY_TO_FD = 'call_reply_to_fd'
+    CALL_REPLY_TO = 'call_reply_to'
     CALL_MAX_TRIES = 'call_max_tries'
 
     _HTTP_200_OK = (b'HTTP/1.1 200 OK\n'
@@ -872,9 +872,9 @@ class RPCKitten:
 
         use_json = kwargs.pop(self.CALL_USE_JSON, False)
 
-        reply_to_fd = kwargs.pop(self.CALL_REPLY_TO_FD, None)
-        if reply_to_fd:
-            args = [reply_to_fd] + list(args)
+        reply_to = kwargs.pop(self.CALL_REPLY_TO, None)
+        if reply_to:
+            args = [reply_to] + list(args)
             kwargs[self.REPLY_TO_FIRST_FD] = True
 
         retries = kwargs.pop(self.CALL_MAX_TRIES, 2)

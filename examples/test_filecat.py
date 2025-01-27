@@ -30,7 +30,7 @@ async def test_function():
     try:
         tmpfile = tempfile.NamedTemporaryFile()
         await kitty.help('ping',
-            call_reply_to_fd=tmpfile.file,
+            call_reply_to=tmpfile.file,
             call_use_json=True)
 
         await asyncio.sleep(0.2)
