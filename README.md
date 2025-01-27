@@ -155,8 +155,8 @@ an API endpoint is simply a Python function named using one of the following pre
 `public_api_`, or `api_` -
 to understand the difference between them, see **Access controls** below.
 
-These functions must always take at least three positional arguments
-(`method`, `headers`, `body`),
+These functions must always take at least one positional argument
+(`request_info`),
 and must either return a single tuple of `(mime-type, data)`,
 or implement a generator which yields such tuples.
 

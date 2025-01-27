@@ -13,7 +13,7 @@ class MyKitten(RPCKitten):
         APP_NAME = 'mykitten'
         WORKER_NAME = 'Kitty'
 
-    async def public_api_meow(self, method, headers, body):
+    async def public_api_meow(self, request_info):
         """/meow
 
         This endpoint requires no authentication!
@@ -26,7 +26,7 @@ class MyKitten(RPCKitten):
             'text/plain',           # Fixed MIME type of `text/plain`
             'Meow world, meow!\n')  # Meow!
 
-    async def api_purr(self, method, headers, body, count=1, purr='purr'):
+    async def api_purr(self, request_info, count=1, purr='purr'):
         """/purr [--count=<N>] [--purr=<sound>]
 
         Authenticated endpoint taking a single argument. The response

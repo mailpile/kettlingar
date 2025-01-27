@@ -34,6 +34,36 @@ def _mkdirp(path, mode):
         os.mkdir(path, mode)
 
 
+class RequestInfo:
+    """
+    Class describing a specific request.
+    """
+    def __init__(self,
+            peer=None,
+            authed=False,
+            writer=None,
+            mimetype=None,
+            encoder=None,
+            method=None,
+            headers=None,
+            path=None,
+            body=None,
+            fds=None):
+        self.peer = peer
+        self.authed = authed
+        self.writer = writer
+        self.mimetype = mimetype
+        self.encoder = encoder
+        self.method = method
+        self.headers = headers
+        self.path = path
+        self.body = body
+        self.fds = [] if (fds is None) else fds
+
+    socket = property(lambda s: s.writer._transport._sock)
+    fileno = property(lambda s: s.writer._transport._sock.fileno())
+
+
 class RPCKitten:
     """
     This is a generic worker process; it runs in the background listening
@@ -524,8 +554,17 @@ class RPCKitten:
                 authed = True
             except PermissionError:
                 authed = False
-            writer, code, mimetype, response = await self._handle_http_request(
-                authed, writer, method, path, hdrs, body, fds)
+
+            (writer, code, mimetype, response
+                ) = await self._handle_http_request(RequestInfo(
+                    peer=peer,
+                    writer=writer,
+                    authed=authed,
+                    method=method,
+                    headers=hdrs,
+                    path=path,
+                    body=body,
+                    fds=fds))
 
             if mimetype is None and response is None:
                 sent = '-'
@@ -584,40 +623,43 @@ class RPCKitten:
             return path[len(self._secret) + 1:]
         return path
 
-    async def _handle_http_request(self,
-            authed, writer, method, path, headers, body, fds):
+    async def _handle_http_request(self, request_info):
         def _b(v):
             return v if isinstance(v, bytes) else bytes(v, 'utf-8')
 
+        authed = request_info.authed
+        writer = request_info.writer
+        method_name = request_info.path[1:].split('/', 1)[0]
         if authed:
-            raw_method = getattr(self, 'raw_' + path[1:], None)
-            api_method = getattr(self, 'api_' + path[1:], None)
-            headers['_AUTHED'] = True
+            raw_method = getattr(self, 'raw_' + method_name, None)
+            api_method = getattr(self, 'api_' + method_name, None)
         else:
             raw_method = api_method = None
-            headers['_AUTHED'] = False
 
         if not raw_method and not api_method:
-            raw_method = getattr(self, 'public_raw_' + path[1:], None)
-            api_method = getattr(self, 'public_api_' + path[1:], None)
+            raw_method = getattr(self, 'public_raw_' + method_name, None)
+            api_method = getattr(self, 'public_api_' + method_name, None)
 
         if not raw_method and not api_method:
-            raise (AttributeError if authed else PermissionError)(path)
+            exc = (AttributeError if request_info.authed else PermissionError)
+            raise exc(path)
 
         args = []
-        mt, enc = 'application/json', self.to_json
-        if method == 'POST':
-            if headers['Content-Type'] == 'application/x-msgpack':
-                mt, enc = 'application/x-msgpack', self.to_msgpack
-                body = self.from_msgpack(body)
+        request_info.mimetype = 'application/json'
+        request_info.encoder = self.to_json
+        if request_info.method == 'POST':
+            if request_info.headers['Content-Type'] == 'application/x-msgpack':
+                request_info.mimetype = 'application/x-msgpack'
+                request_info.encoder = self.to_msgpack
+                body = request_info.body = self.from_msgpack(request_info.body)
                 args = body.pop('_args', [])
-            elif headers['Content-Type'] == 'application/json':
-                body = self.from_json(body)
+            elif request_info.headers['Content-Type'] == 'application/json':
+                body = request_info.body = self.from_json(request_info.body)
                 args = body.pop('_args', [])
 
-        if fds:
-            args = [self._fd_from_magic_arg(a, fds) for a in args]
-            if body.pop(self.REPLY_TO_FIRST_FD, False):
+        if request_info.fds:
+            args = [self._fd_from_magic_arg(a, request_info.fds) for a in args]
+            if request_info.body.pop(self.REPLY_TO_FIRST_FD, False):
                 fd = args.pop(0)
                 loop = asyncio.get_running_loop()
                 if isinstance(fd, socket.socket):
@@ -633,14 +675,14 @@ class RPCKitten:
             raw_method = self._wrap_async_generator(api_method)
 
         if raw_method is not None:
-            create_background_task(
-                raw_method(writer, mt, enc, method, headers, body, *args))
+            create_background_task(raw_method(request_info, *args))
             return writer, 200, None, None
 
         try:
-            mimetype, resp = await api_method(method, headers, body, *args)
+            mimetype, resp = await api_method(request_info, *args)
             if not mimetype:
-                mimetype, resp = mt, enc(resp)
+                mimetype = request_info.mimetype
+                resp = request_info.encoder(resp)
 
             return writer, 200, _b(mimetype), resp
         except Exception as e:
@@ -935,13 +977,13 @@ Content-Length: %d
         Check whether the service is running.
         """
         self._peeraddr = None
-        return await self.call('ping', reconnect=0)
+        return await self.call('ping', call_max_tries=0)
 
     async def quitquitquit(self):
         """
         Shut down the service.
         """
-        return await self.call('quitquitquit', reconnect=0)
+        return await self.call('quitquitquit', call_max_tries=0)
 
     def _http11_chunk(self, buffer):
         try:
@@ -984,20 +1026,24 @@ Content-Length: %d
 
     def _wrap_async_generator(self, api_method):
         # Use chunked encoding to render and yield multiple API results
-        async def raw_method(writer, mt, enc, method, headers, body, *a):
+        async def raw_method(request_info, *args):
+            enc = request_info.encoder
+            kwargs = request_info.body
+            writer = request_info.writer
+            resp_mimetype = request_info.mimetype
             first = True
             try:
-                async for m, r in api_method(method, headers, body, *a, **body):
+                async for m, r in api_method(request_info, *args, **kwargs):
                     mimetype, resp = m, r
                     if resp is None and mimetype is None:
                         return
 
                     if mimetype and first:
-                        mt = mimetype
+                        resp_mimetype = mimetype
                         enc = lambda v: v
                     if first:
-                        writer.write(
-                            self._HTTP_200_CHUNKED_OK % bytes(mt, 'utf-8'))
+                        mt = bytes(resp_mimetype, 'utf-8')
+                        writer.write(self._HTTP_200_CHUNKED_OK % mt)
 
                     data = enc(resp)
                     writer.write(self._HTTP_CHUNK_BEG % len(data))
@@ -1012,8 +1058,9 @@ Content-Length: %d
             except Exception as e:
                 data = enc({'error': str(e)})
                 if first:
+                    mt = bytes(resp_mimetype, 'utf-8')
                     writer.write(self._HTTP_RESPONSE[500])
-                    writer.write(self._HTTP_MIMETYPE % bytes(mt, 'utf-8'))
+                    writer.write(self._HTTP_MIMETYPE % mt)
                     writer.write(data)
                 else:
                     writer.write(self._HTTP_CHUNK_BEG % len(data))
@@ -1026,20 +1073,16 @@ Content-Length: %d
 
         return raw_method
 
-    def is_authed(self, headers):
-        """
-        Public API functions can call this method to check whether an
-        incoming request was authenticated or not.
-        """
-        return headers['_AUTHED']
-
-    async def public_raw_ping(self, writer, mt, enc, method, headers, body,
-            **kwa):
+    async def public_raw_ping(self, request_info, **kwa):
         """/ping
 
         Check whether the microservice is running.
         """
-        if self.is_authed(headers):
+        writer = request_info.writer
+        if request_info.authed:
+            mt = request_info.mimetype
+            enc = request_info.encoder
+            body = request_info.body
             if not isinstance(body, dict):
                 body = {}
 
@@ -1055,7 +1098,7 @@ Content-Length: %d
         await writer.drain()
         writer.close()
 
-    async def api_config(self, m, h, b):
+    async def api_config(self, request_info):
         """/config
 
         Returns the current configuration.
@@ -1064,7 +1107,7 @@ Content-Length: %d
             'config': self.config.as_dict(),
             '_format': str(self.config).replace('%', '%%')}
 
-    async def api_quitquitquit(self, m, h, b):
+    async def api_quitquitquit(self, request_info):
         """/quitquitquit
 
         Shut down the microservice.
@@ -1076,7 +1119,7 @@ Content-Length: %d
         asyncio.get_running_loop().call_soon(self._real_shutdown)
         return None, "Goodbye forever"
 
-    async def api_help(self, m, h, b, command=None):
+    async def api_help(self, request_info, command=None):
         """/help [command]
 
         Returns docstring-based help for existing API methods, or an
@@ -1210,7 +1253,7 @@ Content-Length: %d
                     allowed=self._command_kwargs(command))
 
                 if command == 'help':
-                    _, result = await self.api_help(0, 0, 0, *args, **kwargs)
+                    _, result = await self.api_help(None, *args, **kwargs)
                     return _print_result(result)
 
                 if command == 'start':
@@ -1284,8 +1327,8 @@ class RPCKittenVarz:
         stats = self._get_stats()
         stats[key] = stats.get(key, 0) + 1
 
-    async def public_api_varz(self, method, headers, body):
-        if method != 'GET':
+    async def public_api_varz(self, request_info):
+        if request_info.method != 'GET':
             raise PermissionError('Nope')
         varz = {}
         if hasattr(self, 'stats_public'):
