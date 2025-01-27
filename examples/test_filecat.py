@@ -1,4 +1,6 @@
 import asyncio
+import os
+import tempfile
 import sys
 
 from .filecat import FileCat
@@ -21,6 +23,19 @@ async def test_function():
         with open(__file__, 'rb') as fd:
             contents = await kitty.cat(fd)
             print(str(contents, 'utf-8'))
+    except Exception as e:
+        print('Failed: %s' % e)
+
+    print('Ask kitty to respond directly to an open file...')
+    try:
+        tmpfile = tempfile.NamedTemporaryFile()
+        await kitty.help('ping',
+            call_reply_to_fd=tmpfile.file,
+            call_use_json=True)
+
+        await asyncio.sleep(0.2)
+        with open(tmpfile.name, 'rb') as fd:
+            print(str(fd.read(), 'utf-8'))
     except Exception as e:
         print('Failed: %s' % e)
 

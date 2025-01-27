@@ -4,6 +4,20 @@ import socket
 import traceback
 
 
+class FileWriter:
+    def __init__(self, fd):
+        self.fd = fd
+
+    def write(self, data):
+        return self.fd.write(data)
+
+    async def drain(self):
+        pass
+
+    def close(self):
+        self.fd.close()
+
+
 def log_exceptions(func):
     def wrap_func(*args, **kwargs):
         try:

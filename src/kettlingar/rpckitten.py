@@ -24,7 +24,7 @@ except ImportError:
 from multiprocessing import Process
 from base64 import b64encode
 
-from .asynctools import create_background_task
+from .asynctools import create_background_task, FileWriter
 from .str_utils import str_addr, str_args
 
 
@@ -48,11 +48,21 @@ class RPCKitten:
     """
     _MAGIC_FD = '_FD_BRE_MAGIC_'
     _MAGIC_SOCK = '_SO_BRE_MAGIC_'
+
     FDS_MIMETYPE = 'application/x-fd-magic'
+    REPLY_TO_FIRST_FD = 'reply_to_first_fd'
+
+    CALL_USE_JSON = 'call_use_json'
+    CALL_REPLY_TO_FD = 'call_reply_to_fd'
+    CALL_MAX_TRIES = 'call_max_tries'
 
     _HTTP_200_OK = (b'HTTP/1.1 200 OK\n'
                    b'Content-Type: %s\n'
                    b'Connection: close\n\n')
+    _HTTP_202_REPLIED_TO_FIRST_FD = (b'HTTP/1.1 202 Accepted\n'
+                   b'Content-Type: application/json\n'
+                   b'Connection: close\n\n'
+                   b'{"replied_to_first_fd": true}\n')
     _HTTP_200_CHUNKED_OK = (b'HTTP/1.1 200 OK\n'
                    b'Transfer-Encoding: chunked\n'
                    b'Content-Type: %s\n'
@@ -514,7 +524,7 @@ class RPCKitten:
                 authed = True
             except PermissionError:
                 authed = False
-            code, mimetype, response = await self._handle_http_request(
+            writer, code, mimetype, response = await self._handle_http_request(
                 authed, writer, method, path, hdrs, body, fds)
 
             if mimetype is None and response is None:
@@ -559,7 +569,7 @@ class RPCKitten:
                     'traceback': traceback.format_exc()}))
             self.exception('Error serving %s: %s', method, e)
         finally:
-            log_func = self.debug if (code == 200) else self.warning
+            log_func = self.debug if (200 <= code < 300) else self.warning
             log_func('HTTP %s %s %d %s %s',
                 method, path, code, sent,
                 ':'.join(str(i) for i in peer[:2]))
@@ -607,6 +617,17 @@ class RPCKitten:
 
         if fds:
             args = [self._fd_from_magic_arg(a, fds) for a in args]
+            if body.pop(self.REPLY_TO_FIRST_FD, False):
+                fd = args.pop(0)
+                loop = asyncio.get_running_loop()
+                if isinstance(fd, socket.socket):
+                    writer2 = loop.create_connection(sock=args.pop(0))
+                else:
+                    writer2 = FileWriter(fd)
+                writer.write(self._HTTP_202_REPLIED_TO_FIRST_FD)
+                await writer.drain()
+                writer.close()
+                writer = writer2
 
         if inspect.isasyncgenfunction(api_method):
             raw_method = self._wrap_async_generator(api_method)
@@ -614,21 +635,21 @@ class RPCKitten:
         if raw_method is not None:
             create_background_task(
                 raw_method(writer, mt, enc, method, headers, body, *args))
-            return 200, None, None
+            return writer, 200, None, None
 
         try:
             mimetype, resp = await api_method(method, headers, body, *args)
             if not mimetype:
                 mimetype, resp = mt, enc(resp)
 
-            return 200, _b(mimetype), resp
+            return writer, 200, _b(mimetype), resp
         except Exception as e:
             if authed:
-                return 500, _b(mt), enc({
+                return writer, 500, _b(mt), enc({
                     'error': str(e),
                     'traceback': traceback.format_exc()})
             else:
-                return 500, _b(mt), enc({'error': str(e)})
+                return writer, 500, _b(mt), enc({'error': str(e)})
 
     async def init_servers(self, servers):
         """
@@ -807,7 +828,14 @@ class RPCKitten:
         """
         t0 = time.time()
 
-        retries = kwargs.pop('reconnect', 2)
+        use_json = kwargs.pop(self.CALL_USE_JSON, False)
+
+        reply_to_fd = kwargs.pop(self.CALL_REPLY_TO_FD, None)
+        if reply_to_fd:
+            args = [reply_to_fd] + list(args)
+            kwargs[self.REPLY_TO_FIRST_FD] = True
+
+        retries = kwargs.pop(self.CALL_MAX_TRIES, 2)
         for attempt in range(0, retries + 1):
             try:
                 url = self._url +'/'+ fn
@@ -823,14 +851,21 @@ class RPCKitten:
 
         fds = [a.fileno() for a in args if hasattr(a, 'fileno')]
         kwargs['_args'] = [self._fd_to_magic_arg(a) for a in args]
-        payload = self.to_msgpack(kwargs or {})
+
+        if use_json:
+            mimetype = 'application/json'
+            payload = self.to_json(kwargs or {})
+        else:
+            mimetype = 'application/x-msgpack'
+            payload = self.to_msgpack(kwargs or {})
+
         http_req = bytes("""\
 POST %s HTTP/1.1
 Connection: close
-Content-Type: application/x-msgpack
+Content-Type: %s
 Content-Length: %d
 
-""" % (url_path, len(payload)), 'utf-8') + payload
+""" % (url_path, mimetype, len(payload)), 'utf-8') + payload
 
         try:
             chunked, resp_code, body, result = False, 500, b'', {}
@@ -871,7 +906,7 @@ Content-Length: %d
                         'error': 'Failed to unpack %s: %s' % (body, e),
                         'traceback': traceback.format_exc()}
 
-            if resp_code == 200:
+            if 200 <= resp_code < 300:
                 if (not isinstance(result, dict)) or ('error' not in result):
                     if chunked:
                         return self._chunk_decoder(reader, hdrs, body, rfds)
@@ -891,7 +926,7 @@ Content-Length: %d
             raise exc('HTTP %d: %s' % (resp_code, result.get('error')))
         finally:
             rtime = 1000 * (time.time() - t0)
-            (self.debug if (resp_code == 200) else self.error)(
+            (self.debug if (200 <= resp_code < 300) else self.error)(
                 'CALL %s(%s)%s %s %.2fms',
                 fn, str_args(args), fds, resp_code, rtime)
 
