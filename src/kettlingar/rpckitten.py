@@ -644,7 +644,7 @@ class RPCKitten:
 
         if not raw_method and not api_method:
             exc = (AttributeError if request_info.authed else PermissionError)
-            raise exc(path)
+            raise exc(request_info.path)
 
         args = []
         request_info.mimetype = 'application/json'
@@ -665,7 +665,7 @@ class RPCKitten:
                 fd = args.pop(0)
                 loop = asyncio.get_running_loop()
                 if isinstance(fd, socket.socket):
-                    writer2 = loop.create_connection(sock=args.pop(0))
+                    _, writer2 = await asyncio.open_connection(sock=fd)
                 else:
                     writer2 = FileWriter(fd)
                 writer.write(self._HTTP_202_REPLIED_TO_FIRST_FD)
