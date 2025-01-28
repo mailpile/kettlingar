@@ -212,13 +212,15 @@ class RPCKitten:
 
             self.configure(file_config, strict=True, set_defaults=False)
 
-        def configure(self, args, strict=True, set_defaults=True):
+        def configure(self, args=None, strict=True, set_defaults=True):
             consumed = set()
 
             def _kv(i):
                 k, v = i.strip().split(':')
                 return k.strip, v.strip()
 
+            if not args:
+                args = []
             for arg in args:
                 if arg[:2] == '--' and '=' in arg:
                     key, val = arg[2:].split('=', 1)
@@ -675,7 +677,8 @@ class RPCKitten:
             raw_method = self._wrap_async_generator(api_method)
 
         if raw_method is not None:
-            create_background_task(raw_method(request_info, *args))
+            create_background_task(
+                self._wrap_drain_and_close(raw_method)(request_info, *args))
             return writer, 200, None, None
 
         try:
@@ -1024,6 +1027,19 @@ Content-Length: %d
 
         return decoded_chunk_generator
 
+    def _wrap_drain_and_close(self, raw_method):
+        async def draining_raw_method(request_info, *args):
+            writer = request_info.writer
+            try:
+                return await raw_method(request_info, *args)
+            finally:
+                try:
+                    await writer.drain()
+                    writer.close()
+                except:
+                    pass
+        return draining_raw_method
+
     def _wrap_async_generator(self, api_method):
         # Use chunked encoding to render and yield multiple API results
         async def raw_method(request_info, *args):
@@ -1053,8 +1069,7 @@ Content-Length: %d
                     await writer.drain()
                     first = False
             except (IOError, BrokenPipeError):
-                writer.close()
-                writer = None
+                pass
             except Exception as e:
                 data = enc({'error': str(e)})
                 if first:
@@ -1066,10 +1081,6 @@ Content-Length: %d
                     writer.write(self._HTTP_CHUNK_BEG % len(data))
                     writer.write(data)
                     writer.write(self._HTTP_CHUNK_END)
-            finally:
-                if writer:
-                    await writer.drain()
-                    writer.close()
 
         return raw_method
 
