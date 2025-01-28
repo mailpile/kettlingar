@@ -877,6 +877,10 @@ class RPCKitten:
 
         reply_to = kwargs.pop(self.CALL_REPLY_TO, None)
         if reply_to:
+            if isinstance(reply_to, RequestInfo):
+                if (not use_json) and ('/json' in reply_to.mimetype):
+                    use_json = True
+                reply_to = reply_to.socket
             args = [reply_to] + list(args)
             kwargs[self.REPLY_TO_FIRST_FD] = True
 
@@ -1130,6 +1134,14 @@ Content-Length: %d
         asyncio.get_running_loop().call_soon(self._real_shutdown)
         return None, "Goodbye forever"
 
+    def get_docstring(self, method):
+        """
+        Fetch the docstring for a given method.
+
+        Submodules can override this if they want to provide custom help.
+        """
+        return getattr(method, '__doc__', None)
+
     async def api_help(self, request_info, command=None):
         """/help [command]
 
@@ -1138,7 +1150,7 @@ Content-Length: %d
         """
         def doc(obj):
             docstring = (
-                    getattr(obj, '__doc__', None) or 'No Help Available'
+                    self.get_docstring(obj) or 'No Help Available'
                 ).strip()
             return docstring.replace('\n    ', '\n') + '\n'
 
