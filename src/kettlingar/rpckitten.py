@@ -330,8 +330,12 @@ class RPCKitten:
             if inspect.isasyncgenfunction(api_method):
                 async def _func(*args, **kwargs):
                     _generator = await self.call(fname, *args, **kwargs)
-                    async for result in _generator():
-                        yield result
+                    if isinstance(_generator, dict):
+                        # This happens whith call_reply_to
+                        yield _generator
+                    else:
+                        async for result in _generator():
+                            yield result
             else:
                 async def _func(*args, **kwargs):
                     return await self.call(fname, *args, **kwargs)
@@ -671,7 +675,7 @@ class RPCKitten:
                 writer.write(self._HTTP_202_REPLIED_TO_FIRST_FD)
                 await writer.drain()
                 writer.close()
-                writer = writer2
+                request_info.writer = writer = writer2
 
         if inspect.isasyncgenfunction(api_method):
             raw_method = self._wrap_async_generator(api_method)
@@ -1036,6 +1040,14 @@ Content-Length: %d
             writer = request_info.writer
             try:
                 return await raw_method(request_info, *args)
+            except Exception as e:
+                err = {'error': str(e)}
+                if request_info.authed:
+                    err['traceback'] = traceback.format_exc()
+                mt = bytes(request_info.mimetype, 'utf-8')
+                writer.write(self._HTTP_RESPONSE[500])
+                writer.write(self._HTTP_MIMETYPE % mt)
+                writer.write(request_info.encoder(err))
             finally:
                 try:
                     await writer.drain()
