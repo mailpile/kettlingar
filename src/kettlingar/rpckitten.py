@@ -539,6 +539,7 @@ class RPCKitten:
             writer.write(data)
             return len(data)
 
+        code = 500
         fds_ok = False
         method = path = version = ''
         try:
@@ -767,22 +768,44 @@ class RPCKitten:
         """
         return json.loads(jd if isinstance(jd, str) else str(jd, 'utf-8'))
 
-    def to_msgpack(self, data):
+    def to_msgpack(self, data, default=None):
         """
         Serializes the data to msgpack, returning the packed data as bytes.
 
+        This augments the standard msgpack with (crude) support for arbitrary
+        sized BigInts - if msgpack cannot handle the int, it will be encoded
+        as a hexadecimal string using ExtType(1).
+
         Override this if you need de/serialization for app-specific data.
         """
-        return msgpack.packb(data)
+        def _to_exttype(obj):
+            if isinstance(obj, int):
+                return msgpack.ExtType(1, b'%x' % obj)
+            if default is not None:
+                return default(obj)
+            raise TypeError('Unhandled data type: %s' % (type(obj).__name__,))
+        try:
+            return msgpack.packb(data, default=_to_exttype)
+        except Exception as exc:
+            raise ValueError('to_msgpack failed: %s' % (exc,))
 
-    def from_msgpack(self, d):
+    def from_msgpack(self, d, ext_hook=None):
         """
         Deserializes data from msgpack.
 
+        See to_msgpack() for details on BigInt support.
+
         Override this if you need de/serialization for app-specific data.
         """
-        return msgpack.unpackb(
-            d if isinstance(d, (bytes, bytearray)) else bytes(d, 'latin-1'))
+        def _from_exttype(code, data):
+            if code == 1:
+                return int(data, 16)
+            if ext_hook is not None:
+                return ext_hook(code, data)
+            return msgpack.ExtType(code, data)
+
+        d = d if isinstance(d, (bytes, bytearray)) else bytes(d, 'latin-1')
+        return msgpack.unpackb(d, ext_hook=_from_exttype)
 
     async def _url_connect(self, url):
         proto, _, host_port, path = url.split('/', 3)
