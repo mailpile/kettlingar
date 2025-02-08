@@ -650,7 +650,7 @@ class RPCKitten:
             exc = (AttributeError if request_info.authed else PermissionError)
             raise exc(request_info.path)
 
-        args = []
+        args, kwargs = [], {}
         request_info.mimetype = 'application/json'
         request_info.encoder = self.to_json
         if request_info.method == 'POST':
@@ -659,9 +659,11 @@ class RPCKitten:
                 request_info.encoder = self.to_msgpack
                 body = request_info.body = self.from_msgpack(request_info.body)
                 args = body.pop('_args', [])
+                kwargs = body
             elif request_info.headers['Content-Type'] == 'application/json':
                 body = request_info.body = self.from_json(request_info.body)
                 args = body.pop('_args', [])
+                kwargs = body
 
         if request_info.fds:
             args = [self._fd_from_magic_arg(a, request_info.fds) for a in args]
@@ -681,12 +683,12 @@ class RPCKitten:
             raw_method = self._wrap_async_generator(api_method)
 
         if raw_method is not None:
-            create_background_task(
-                self._wrap_drain_and_close(raw_method)(request_info, *args))
+            _wrapped =self._wrap_drain_and_close(raw_method)
+            create_background_task(_wrapped(request_info, *args, **kwargs))
             return writer, 200, None, None
 
         try:
-            mimetype, resp = await api_method(request_info, *args)
+            mimetype, resp = await api_method(request_info, *args, **kwargs)
             if not mimetype:
                 mimetype = request_info.mimetype
                 resp = request_info.encoder(resp)
@@ -1036,10 +1038,10 @@ Content-Length: %d
         return decoded_chunk_generator
 
     def _wrap_drain_and_close(self, raw_method):
-        async def draining_raw_method(request_info, *args):
+        async def draining_raw_method(request_info, *args, **kwargs):
             writer = request_info.writer
             try:
-                return await raw_method(request_info, *args)
+                return await raw_method(request_info, *args, **kwargs)
             except Exception as e:
                 err = {'error': str(e)}
                 if request_info.authed:
@@ -1058,9 +1060,8 @@ Content-Length: %d
 
     def _wrap_async_generator(self, api_method):
         # Use chunked encoding to render and yield multiple API results
-        async def raw_method(request_info, *args):
+        async def raw_method(request_info, *args, **kwargs):
             enc = request_info.encoder
-            kwargs = request_info.body
             writer = request_info.writer
             resp_mimetype = request_info.mimetype
             first = True
@@ -1226,6 +1227,21 @@ Content-Length: %d
         return [a for a in args if not is_arg(a)], kwargs
 
     @classmethod
+    def TextFormat(cls, result):
+        if isinstance(result, dict) and '_format' in result:
+            return result.pop('_format')
+        else:
+            return '%s'
+
+    def print_result(self, result, print_raw=False, print_json=False):
+        if print_raw:
+            print('%s' % result)
+        elif print_json:
+            print(str(self.to_json(result), 'utf-8'))
+        else:
+            print(self.TextFormat(result) % result)
+
+    @classmethod
     def Main(cls, args):
         """Usage: rpckitten <command> [--json|--raw] [<args ...>]
 
@@ -1269,16 +1285,7 @@ Content-Length: %d
             command = args.pop(0)
 
             def _print_result(result):
-                if isinstance(result, dict) and '_format' in result:
-                    fmt = result.pop('_format')
-                else:
-                    fmt = '%s'
-                if print_raw:
-                    print('%s' % result)
-                elif print_json:
-                    print(str(self.to_json(result), 'utf-8'))
-                else:
-                    print(fmt % result)
+                self.print_result(result, print_raw=print_raw, print_json=print_json)
 
             try:
                 if args and command in ('start', 'stop', 'restart'):

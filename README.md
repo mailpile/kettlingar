@@ -330,7 +330,7 @@ It's also just neat and I wanted to play with it!
 
 ```bash
 git clone https://github.com/mailpile/kettlingar.git
-cd python-project-template
+cd kettlingar
 ```
 
 2. Create a virtual environment
