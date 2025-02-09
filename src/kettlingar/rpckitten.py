@@ -684,7 +684,7 @@ class RPCKitten:
             raw_method = self._wrap_async_generator(api_method)
 
         if raw_method is not None:
-            _wrapped =self._wrap_drain_and_close(raw_method)
+            _wrapped = self._wrap_drain_and_close(raw_method)
             create_background_task(_wrapped(request_info, *args, **kwargs))
             return writer, 200, None, None
 
@@ -1064,7 +1064,11 @@ Content-Length: %d
         async def draining_raw_method(request_info, *args, **kwargs):
             writer = request_info.writer
             try:
-                return await raw_method(request_info, *args, **kwargs)
+                await raw_method(request_info, *args, **kwargs)
+                # As we may be passing the underlying file descriptor to
+                # another worker, try not to be too hasty about closing.
+                await writer.drain()
+                return await asyncio.sleep(0.01)
             except Exception as e:
                 err = {'error': str(e)}
                 if request_info.authed:
@@ -1073,12 +1077,10 @@ Content-Length: %d
                 writer.write(self._HTTP_RESPONSE[500])
                 writer.write(self._HTTP_MIMETYPE % mt)
                 writer.write(request_info.encoder(err))
+                await writer.drain()
             finally:
-                try:
-                    await writer.drain()
-                    writer.close()
-                except:
-                    pass
+                # Defer this slightly, again avoiding premature closing
+                asyncio.get_running_loop().call_soon(writer.close)
         return draining_raw_method
 
     def _wrap_async_generator(self, api_method):
