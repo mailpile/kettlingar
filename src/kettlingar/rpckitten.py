@@ -1025,7 +1025,7 @@ Content-Length: %d
         try:
             ln, data = buffer.split(b'\r\n', 1)
             ln = int(ln, 16)
-            if len(data) >= ln:
+            if len(data) >= ln+2:
                 return data[:ln], data[ln+2:]
         except (ValueError, IndexError):
             pass
@@ -1067,7 +1067,6 @@ Content-Length: %d
                 await raw_method(request_info, *args, **kwargs)
                 # As we may be passing the underlying file descriptor to
                 # another worker, try not to be too hasty about closing.
-                await writer.drain()
                 return await asyncio.sleep(0.01)
             except Exception as e:
                 err = {'error': str(e)}
@@ -1077,8 +1076,11 @@ Content-Length: %d
                 writer.write(self._HTTP_RESPONSE[500])
                 writer.write(self._HTTP_MIMETYPE % mt)
                 writer.write(request_info.encoder(err))
-                await writer.drain()
             finally:
+                try:
+                    await writer.drain()
+                except:
+                    pass
                 # Defer this slightly, again avoiding premature closing
                 asyncio.get_running_loop().call_soon(writer.close)
         return draining_raw_method
@@ -1110,8 +1112,8 @@ Content-Length: %d
 
                     await writer.drain()
                     first = False
-            except (IOError, BrokenPipeError):
-                pass
+            except (IOError, BrokenPipeError) as exc:
+                self.debug('Broken pipe: %s' % exc)
             except Exception as e:
                 data = enc({'error': str(e)})
                 if first:
