@@ -1265,6 +1265,8 @@ Content-Length: %d
             print('%s' % result)
         elif print_json:
             print(str(self.to_json(result), 'utf-8'))
+        elif isinstance(result, bytearray):
+            sys.stdout.buffer.write(result)
         else:
             print(self.TextFormat(result) % result)
 
