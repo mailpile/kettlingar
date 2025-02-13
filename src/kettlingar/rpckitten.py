@@ -557,7 +557,7 @@ class RPCKitten:
                     else:
                         raise AttributeError()
 
-                path = await self._validate_request_header(path, head)
+                path = await self.validate_request_header(path, head)
                 authed = True
             except PermissionError:
                 authed = False
@@ -623,7 +623,14 @@ class RPCKitten:
                 await writer.drain()
                 writer.close()
 
-    async def _validate_request_header(self, path, header):
+    async def validate_request_header(self, path, header):
+        """
+        This checks a request header for authentication. Subclasses can override this
+        to implement their own access control policies.
+
+        Raises a PermissionError if access is denied, otherwise it returns the URL
+        path (with any access tokens removed).
+        """
         if self._secret not in header:
             raise PermissionError()
         if path.startswith('/' + self._secret + '/'):
