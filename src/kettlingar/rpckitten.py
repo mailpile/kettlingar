@@ -1253,12 +1253,19 @@ Content-Length: %d
             # kwargs == {'three': 'four'}
 
         """
-        is_arg = lambda a: isinstance(a, str) and a[:2] == '--'
-        kwargs = dict(a[2:].split('=', 1) for a in args if is_arg(a))
+        def _is_arg(a):
+            return isinstance(a, str) and a[:2] == '--'
+
+        def _split(a):
+            k, v = a[2:].split('=', 1)
+            return k.replace('-', '_'), v
+
+        kwargs = dict(_split(a) for a in args if _is_arg(a))
         for k in kwargs:
             if allowed and k not in allowed:
                 raise ValueError('Unrecognized option: --%s' % k)
-        return [a for a in args if not is_arg(a)], kwargs
+
+        return [a for a in args if not _is_arg(a)], kwargs
 
     @classmethod
     def TextFormat(cls, result):
