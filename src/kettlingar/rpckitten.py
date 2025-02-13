@@ -533,6 +533,10 @@ class RPCKitten:
         if not header:
             raise ValueError('Header not found in HTTP data')
 
+        if want_bytes:
+            raise IOError(
+                'HTTP data incomplete, expected %d more bytes' % want_bytes)
+
         return header, headers, request[hend+2:], fds
 
     async def _serve_http(self, reader, writer):
