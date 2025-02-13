@@ -75,6 +75,9 @@ class RPCKitten:
     (or `public_raw_FUNCTION_NAME`)
 
     FIXME: Write more!
+
+    FIXME: Implement a local-code-only mode, where the backend is not a
+           separate process.
     """
     _MAGIC_FD = '_FD_BRE_MAGIC_'
     _MAGIC_SOCK = '_SO_BRE_MAGIC_'
@@ -895,6 +898,22 @@ class RPCKitten:
                 return os.fdopen(fds.pop(0), mode=mode)
         return a
 
+    def _get_exception(self, resp_code):
+        exc = RuntimeError
+        try:
+            resp_code = int(resp_code)
+        except:
+            pass
+        if resp_code in (401, 403, 407):
+            exc = PermissionError
+        elif resp_code in (404, ):
+            exc = KeyError
+        elif 300 <= resp_code < 400:
+            exc = IOError
+        elif 400 <= resp_code < 500:
+            exc = ValueError
+        return exc
+
     async def call(self, fn, *args, **kwargs):
         """
         Invoke function `fn` on the microservice, sending over the args
@@ -998,14 +1017,7 @@ Content-Length: %d
                     return result
                 resp_code = 500
 
-            exc = RuntimeError
-            if resp_code in (401, 403, 407):
-                exc = PermissionError
-            elif 300 <= resp_code < 400:
-                exc = IOError
-            elif 400 <= resp_code < 500:
-                exc = ValueError
-
+            exc = self._get_exception(resp_code)
             if 'traceback' in result:
                 self.error('Remote %s', result['traceback'])
             raise exc('HTTP %d: %s' % (resp_code, result.get('error')))
@@ -1051,6 +1063,8 @@ Content-Length: %d
             nonlocal reader, buffer
             if rfds:
                 yield {'received_fds': rfds}
+
+            finished = False
             while True:
                 chunk, buffer = self._http11_chunk(buffer)
                 if chunk is None:
@@ -1062,8 +1076,14 @@ Content-Length: %d
                             reader = None
                     else:
                         break
+                elif chunk == b'':
+                    finished = True
                 else:
                     yield decode(chunk)
+
+            if not finished:
+                # FIXME: This needs documenting!
+                raise IOError('Incomplete result, missing end-of-stream marker')
 
         return decoded_chunk_generator
 
@@ -1094,6 +1114,8 @@ Content-Length: %d
 
     def _wrap_async_generator(self, api_method):
         # Use chunked encoding to render and yield multiple API results
+        class RemoteError(Exception):
+            http_code = 500
         async def raw_method(request_info, *args, **kwargs):
             enc = request_info.encoder
             writer = request_info.writer
@@ -1109,6 +1131,12 @@ Content-Length: %d
                         resp_mimetype = mimetype
                         enc = lambda v: v
                     if first:
+                        if not mimetype and isinstance(resp, dict):
+                            if 'finished' in resp and 'error' in resp:
+                                re = RemoteError(resp['error'])
+                                re.http_code = resp['finished']
+                                raise re
+
                         mt = bytes(resp_mimetype, 'utf-8')
                         writer.write(self._HTTP_200_CHUNKED_OK % mt)
 
@@ -1119,13 +1147,25 @@ Content-Length: %d
 
                     await writer.drain()
                     first = False
+
+                # Send an empty chunk, to delimit a completed stream
+                writer.write(self._HTTP_CHUNK_BEG % 0)
+                writer.write(self._HTTP_CHUNK_END)
+                # FIXME: This needs documenting!
+
             except (IOError, BrokenPipeError) as exc:
                 self.debug('Broken pipe: %s' % exc)
             except Exception as e:
                 data = enc({'error': str(e)})
                 if first:
+                    http_resp = self._HTTP_RESPONSE[500]
+                    try:
+                        http_resp = self._HTTP_RESPONSE[int(e.http_code)]
+                    except (AttributeError, ValueError, KeyError):
+                        pass
+
                     mt = bytes(resp_mimetype, 'utf-8')
-                    writer.write(self._HTTP_RESPONSE[500])
+                    writer.write(http_resp)
                     writer.write(self._HTTP_MIMETYPE % mt)
                     writer.write(data)
                 else:
@@ -1376,18 +1416,21 @@ Content-Length: %d
                 sys.stderr.write(
                     '%s: Not running: Start it first?\n' % self.name)
                 sys.exit(1)
-            except ValueError as e:
+            except KeyError as e:
                 sys.stderr.write('%s %s failed: %s\n' % (self.name, command, e))
                 sys.exit(2)
-            except IOError as e:
+            except ValueError as e:
                 sys.stderr.write('%s %s failed: %s\n' % (self.name, command, e))
                 sys.exit(3)
-            except PermissionError as e:
+            except IOError as e:
                 sys.stderr.write('%s %s failed: %s\n' % (self.name, command, e))
                 sys.exit(4)
-            except RuntimeError as e:
+            except PermissionError as e:
                 sys.stderr.write('%s %s failed: %s\n' % (self.name, command, e))
                 sys.exit(5)
+            except RuntimeError as e:
+                sys.stderr.write('%s %s failed: %s\n' % (self.name, command, e))
+                sys.exit(6)
 
         try:
             # FIXME: Allow options or environment variables that tweak
