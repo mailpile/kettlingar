@@ -48,6 +48,15 @@ class MyKitten(RPCKitten):
                 result)                  # Result object
             await asyncio.sleep(1)
 
+    async def api_both(self, request_info):
+        """/both
+
+        Meow and purr. This demonstrates API methods invoking each-other.
+        """
+        yield None, await self.meow()
+        async for purr in self.purr(1):
+            yield None, purr
+
 
 if __name__ == '__main__':
     import sys

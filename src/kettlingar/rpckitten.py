@@ -285,7 +285,8 @@ class RPCKitten:
         self._secret = None
         self._process = None
 
-        self._init_convenience_methods()
+        self._convenience_methods = set()
+        self._remote_convenience_methods()
         self._init_logging()
 
     def _command_fullargspec(self, command):
@@ -328,7 +329,19 @@ class RPCKitten:
     api_addr = property(lambda s: s._peeraddr)
     api_secret = property(lambda s: s._secret)
 
-    def _init_convenience_methods(self):
+    def _local_convenience_methods(self):
+        def _mk_func(fname, api_method):
+            if inspect.isasyncgenfunction(api_method):
+                async def _func(*args, **kwargs):
+                    async for result in api_method(None, *args, **kwargs):
+                        yield result[1]
+            else:
+                async def _func(*args, **kwargs):
+                    return (await api_method(None, *args, **kwargs))[1]
+            return _func
+        self._make_convenience_methods(_mk_func)
+
+    def _remote_convenience_methods(self):
         def _mk_func(fname, api_method):
             if inspect.isasyncgenfunction(api_method):
                 async def _func(*args, **kwargs):
@@ -343,14 +356,17 @@ class RPCKitten:
                 async def _func(*args, **kwargs):
                     return await self.call(fname, *args, **kwargs)
             return _func
+        self._make_convenience_methods(_mk_func)
 
+    def _make_convenience_methods(self, mk_func):
         for api_fname in dir(self):
             for prefix in ('public_api_', 'public_raw_', 'api_', 'raw_'):
                 if api_fname.startswith(prefix):
                     api_func = getattr(self, api_fname)
                     fname = api_fname[len(prefix):]
-                    if not hasattr(self, fname):
-                        setattr(self, fname, _mk_func(fname, api_func))
+                    if (not hasattr(self, fname)) or fname in self._convenience_methods:
+                        self._convenience_methods.add(fname)
+                        setattr(self, fname, mk_func(fname, api_func))
 
     async def connect(self, auto_start=False, retry=3):
         for tried in range(0, retry + 1):
@@ -457,6 +473,9 @@ class RPCKitten:
     def _process_run(self):
         try:
             logging.getLogger().setLevel(self.config.worker_log_level)
+
+            # Override the convenience methods with more efficient local variants
+            self._local_convenience_methods()
 
             if signal is not None:
                 signal.signal(signal.SIGUSR2, self._log_more)
