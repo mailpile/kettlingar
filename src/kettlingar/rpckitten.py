@@ -285,6 +285,8 @@ class RPCKitten:
         self._secret = None
         self._process = None
 
+        self.is_client = True
+        self.is_service = False
         self._convenience_methods = set()
         self._remote_convenience_methods()
         self._init_logging()
@@ -476,6 +478,8 @@ class RPCKitten:
 
             # Override the convenience methods with more efficient local variants
             self._local_convenience_methods()
+            self.is_client = False
+            self.is_service = True
 
             if signal is not None:
                 signal.signal(signal.SIGUSR2, self._log_more)
