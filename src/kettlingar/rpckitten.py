@@ -666,12 +666,12 @@ class RPCKitten:
             raise exc(request_info.path)
 
         args, kwargs = [], {}
-        request_info.mimetype = 'application/json'
-        request_info.encoder = self.to_json
+        mt = request_info.mimetype = 'application/json'
+        enc = request_info.encoder = self.to_json
         if request_info.method == 'POST':
             if request_info.headers['Content-Type'] == 'application/x-msgpack':
-                request_info.mimetype = 'application/x-msgpack'
-                request_info.encoder = self.to_msgpack
+                request_info.mimetype = mt = 'application/x-msgpack'
+                request_info.encoder = enc = self.to_msgpack
                 body = request_info.body = self.from_msgpack(request_info.body)
                 args = body.pop('_args', [])
                 kwargs = body
