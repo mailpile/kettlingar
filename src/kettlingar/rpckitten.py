@@ -1411,9 +1411,13 @@ Content-Length: %d
                 if command == 'start':
                     await self.connect(auto_start=True)
                     if self._url:
-                        print('%s: Running at %s' % (name, self._url))
+                        msg = '%s: Running at %s' % (name, self._url)
+                        self.info(msg)
+                        print(msg)
                     if self._unixfile and os.path.exists(self._unixfile):
-                        print('%s: Running at %s' % (name, self._unixfile))
+                        msg = '%s: Running at %s' % (name, self._unixfile)
+                        self.info(msg)
+                        print(msg)
                     return os._exit(0)
 
                 if command == 'stop':
