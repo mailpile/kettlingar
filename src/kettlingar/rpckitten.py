@@ -339,7 +339,12 @@ class RPCKitten:
                         yield result[1]
             else:
                 async def _func(*args, **kwargs):
-                    return (await api_method(None, *args, **kwargs))[1]
+                    ctype, data = await api_method(None, *args, **kwargs)
+                    if ctype is None:
+                        return data
+                    else:
+                        data = bytearray(data, 'utf-8') if isinstance(data, str) else data
+                        return {'mimetype': ctype, 'data': data}
             return _func
         self._make_convenience_methods(_mk_func)
 
@@ -370,7 +375,19 @@ class RPCKitten:
                         self._convenience_methods.add(fname)
                         setattr(self, fname, mk_func(fname, api_func))
 
+    async def loopback(self):
+        """
+        Use this instead of connect() to behave as a library, handling
+        everything locally (without launching a service process).
+        """
+        self._setup_service()
+        self._servers = await self.init_servers([])
+
     async def connect(self, auto_start=False, retry=3):
+        """
+        Establish a connection with the running service, optionally
+        launching the service if it isn't yet running.
+        """
         for tried in range(0, retry + 1):
             try:
                 with open(self._urlfile, 'r') as fd:
@@ -472,15 +489,17 @@ class RPCKitten:
         """
         logging.log(1, '[%s] %s', self.name, (fmt % args) if args else fmt)
 
+    def _setup_service(self):
+        logging.getLogger().setLevel(self.config.worker_log_level)
+
+        # Override the convenience methods with more efficient local variants
+        self._local_convenience_methods()
+        self.is_client = False
+        self.is_service = True
+
     def _process_run(self):
         try:
-            logging.getLogger().setLevel(self.config.worker_log_level)
-
-            # Override the convenience methods with more efficient local variants
-            self._local_convenience_methods()
-            self.is_client = False
-            self.is_service = True
-
+            self._setup_service()
             if signal is not None:
                 signal.signal(signal.SIGUSR2, self._log_more)
             if self.config.worker_nice and hasattr(os, 'nice'):
@@ -1058,14 +1077,21 @@ Content-Length: %d
         """
         Check whether the service is running.
         """
-        self._peeraddr = None
-        return await self.call('ping', call_max_tries=0)
+        if self.is_client:
+            self._peeraddr = None
+            return await self.call('ping', call_max_tries=0)
+        else:
+            return {'pong': True, 'loopback': True}
 
     async def quitquitquit(self):
         """
         Shut down the service.
         """
-        return await self.call('quitquitquit', call_max_tries=0)
+        if self.is_client:
+            return await self.call('quitquitquit', call_max_tries=0)
+        else:
+            await self.shutdown()
+            return True
 
     def _http11_chunk(self, buffer):
         try:
