@@ -18,7 +18,7 @@ class MyKitten(RPCKitten):
 
         Serve up a placeholder at the root of the web server.
         """
-        return 'text/html', '<html><body><h1>Kitty world</h1></body></html>'
+        return 'text/html', '<html><body><h1>Hello Kitty World!</h1></body></html>'
 
     async def public_api_meow(self, request_info):
         """/meow
@@ -63,6 +63,13 @@ class MyKitten(RPCKitten):
         yield None, await self.meow()
         async for purr in self.purr(1):
             yield None, purr
+
+    def get_default_methods(self, request_info):
+        """/*
+
+        Respond to any otherwise unrecognized request with a meow.
+        """
+        return (self.public_api_meow, None)
 
 
 if __name__ == '__main__':
