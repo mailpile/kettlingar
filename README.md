@@ -213,8 +213,8 @@ If you want to implement a public landing page at `/`
 (the root of the web server)
 you can do so by creating an API endpoint named `public_api_web_root`.
 The routing mechanism can be customzied by subclassing and overriding or extending
-`RPCKittens.get_method_name(...)` and/or
-`RPCKittens.get_default_methods(...)`.
+`RPCKitten.get_method_name(...)` and/or
+`RPCKitten.get_default_methods(...)`.
 
 
 # Access controls
