@@ -35,3 +35,6 @@ dev = [
     "ruff>=0.8.4",
     "uv>=0.5.12",
 ]
+public = [
+    "upagekite>=0.3.2",
+]
