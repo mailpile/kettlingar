@@ -182,14 +182,14 @@ so write them carefully!
 In the above example,
 `kettlingar` uses introspection (the `inspect` module) to auto-generate client functions for each of the two API methods:
 `MyKitten.meow()` and
-`MyKitten.purr()`.
+`MyKitten.purr(...)`.
 
 When invoked,
-each client function will use `MyKitten.call()`
+each client function will use `MyKitten.call(...)`
 and then either return the result directly or implement a generator.
 
 Digging even deeper,
-`MyKitten.call()` makes an HTTP/1.1 POST request to the running microservice,
+`MyKitten.call(...)` makes an HTTP/1.1 POST request to the running microservice,
 using `msgpack` to bundle up all the arguments and deserialized the response.
 
 (JSON is also supported for interfacing with humans or systems lacking `msgpack`.)
@@ -208,6 +208,13 @@ Kettlingar implements a subset of the HTTP/1.1 specification.
 This allows us to use tools like `curl` or even a web browser for debugging and should facilitate use of non-Python clients.
 But the emphasis was on simplicity (and hopefully performance),
 rather than a complete implementation.
+
+If you want to implement a public landing page at `/`
+(the root of the web server)
+you can do so by creating an API endpoint named `public_api_web_root`.
+The routing mechanism can be customzied by subclassing and overriding or extending
+`RPCKittens.get_method_name(...)` and/or
+`RPCKittens.get_default_methods(...)`.
 
 
 # Access controls

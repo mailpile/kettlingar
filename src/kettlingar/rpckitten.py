@@ -682,9 +682,32 @@ class RPCKitten:
         """
         if self._secret not in header:
             raise PermissionError()
-        if path.startswith('/' + self._secret + '/'):
+        if (path + '/').startswith('/' + self._secret + '/'):
             return path[len(self._secret) + 1:]
         return path
+
+    def get_method_name(self, request_info):
+        """
+        This function derives the basic method name (e.g. `ping`), from
+        `request_info.path`. It returns the first component of the path,
+        or the name `web_root` if the path is empty (`/`).
+
+        Subclasses can override this to implement their own routing logic.
+        """
+        return request_info.path[1:].split('/', 1)[0] or 'web_root'
+
+    def get_default_methods(self, request_info):
+        """
+        If the default function lookup mechanism fails, this function is
+        called as a last-resort effort to route the request. By default
+        it raises an exception to trigger a 404 or 403 error.
+
+        Subclasses can override this with a function that returns a tuple
+        of (api_method, raw_method), one of which should be `None` and the
+        other an async API method function.
+        """
+        exc = (AttributeError if request_info.authed else PermissionError)
+        raise exc(request_info.path)
 
     async def _handle_http_request(self, request_info):
         def _b(v):
@@ -692,7 +715,7 @@ class RPCKitten:
 
         authed = request_info.authed
         writer = request_info.writer
-        method_name = request_info.path[1:].split('/', 1)[0]
+        method_name = self.get_method_name(request_info)
         if authed:
             raw_method = getattr(self, 'raw_' + method_name, None)
             api_method = getattr(self, 'api_' + method_name, None)
@@ -704,8 +727,7 @@ class RPCKitten:
             api_method = getattr(self, 'public_api_' + method_name, None)
 
         if not raw_method and not api_method:
-            exc = (AttributeError if request_info.authed else PermissionError)
-            raise exc(request_info.path)
+            api_method, raw_method = self.get_default_methods(request_info)
 
         args, kwargs = [], {}
         mt = request_info.mimetype = 'application/json'

@@ -13,6 +13,13 @@ class MyKitten(RPCKitten):
         APP_NAME = 'mykitten'
         WORKER_NAME = 'Kitty'
 
+    async def public_api_web_root(self, request_info):
+        """/
+
+        Serve up a placeholder at the root of the web server.
+        """
+        return 'text/html', '<html><body><h1>Kitty world</h1></body></html>'
+
     async def public_api_meow(self, request_info):
         """/meow
 
