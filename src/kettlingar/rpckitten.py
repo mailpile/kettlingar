@@ -10,6 +10,7 @@ import socket
 import sys
 import time
 import traceback
+import urllib.parse
 
 try:
     from setproctitle import setproctitle
@@ -99,6 +100,10 @@ class RPCKitten:
     _HTTP_200_CHUNKED_OK = (b'HTTP/1.1 200 OK\n'
                    b'Transfer-Encoding: chunked\n'
                    b'Content-Type: %s\n'
+                   b'Connection: close\n\n')
+    _HTTP_200_EVENT_STREAM_OK = (b'HTTP/1.1 200 OK\n'
+                   b'Content-Type: text/event-stream\n'
+                   b'Cache-Control: no-cache\n'
                    b'Connection: close\n\n')
     _HTTP_200_STATIC_PONG = (b'HTTP/1.1 200 OK\n'
                    b'Content-Type: text/plain\n'
@@ -733,16 +738,26 @@ class RPCKitten:
         mt = request_info.mimetype = 'application/json'
         enc = request_info.encoder = self.to_json
         if request_info.method == 'POST':
-            if request_info.headers['Content-Type'] == 'application/x-msgpack':
-                request_info.mimetype = mt = 'application/x-msgpack'
+            ctype = request_info.headers['Content-Type']
+            if ctype == 'application/x-msgpack':
+                request_info.mimetype = mt = ctype
                 request_info.encoder = enc = self.to_msgpack
                 body = request_info.body = self.from_msgpack(request_info.body)
                 args = body.pop('_args', [])
                 kwargs = body
-            elif request_info.headers['Content-Type'] == 'application/json':
+            elif ctype == 'application/json':
                 body = request_info.body = self.from_json(request_info.body)
                 args = body.pop('_args', [])
                 kwargs = body
+            elif ctype == 'application/x-www-form-urlencoded':
+                body = str(request_info.body, 'utf-8').strip()
+                kwargs = urllib.parse.parse_qs(body)
+                for k in kwargs.keys():
+                    if len(kwargs[k]) == 1:
+                        kwargs[k] = kwargs[k][0]
+                args = kwargs.pop('_args', [])
+            else:
+                self.warning('Unhandled POST MIME type: %s' % ctype)
 
         if request_info.fds:
             args = [self._fd_from_magic_arg(a, request_info.fds) for a in args]
@@ -1187,15 +1202,42 @@ Content-Length: %d
                 asyncio.get_running_loop().call_soon(writer.close)
         return draining_raw_method
 
+    def _send_chunked(self, writer, data):
+        writer.write(self._HTTP_CHUNK_BEG % len(data))
+        if data:
+            writer.write(data)
+        writer.write(self._HTTP_CHUNK_END)
+
+    def _send_server_event(self, writer, event):
+        chunk = []
+        for key in ('id', 'event', 'retry'):
+            val = event.pop(key, None)
+            if val is not None:
+                chunk.append(bytes('%s: %s' % (key, val), 'utf-8'))
+
+        data = event.pop('data', event)
+        if data:
+            if isinstance(data, str):
+                data = bytes(data, 'utf-8')
+            if not isinstance(data, bytes):
+                data = self.to_json(data)
+            for line in data.splitlines():
+                chunk.append(b'data: %s' % line)
+
+        chunk.append(b'\n')
+        writer.write(b'\n'.join(chunk))
+
     def _wrap_async_generator(self, api_method):
-        # Use chunked encoding to render and yield multiple API results
+        # Use chunked encoding or text/event-stream to send multiple results
         class RemoteError(Exception):
             http_code = 500
         async def raw_method(request_info, *args, **kwargs):
             enc = request_info.encoder
             writer = request_info.writer
             resp_mimetype = request_info.mimetype
+            events = False
             first = True
+            send_chunk = self._send_chunked
             try:
                 async for m, r in api_method(request_info, *args, **kwargs):
                     mimetype, resp = m, r
@@ -1205,6 +1247,9 @@ Content-Length: %d
                     if mimetype and first:
                         resp_mimetype = mimetype
                         enc = lambda v: v
+                        if resp_mimetype == 'text/event-stream':
+                            events = send_chunk = self._send_server_event
+
                     if first:
                         if not mimetype and isinstance(resp, dict):
                             if 'finished' in resp and 'error' in resp:
@@ -1212,21 +1257,20 @@ Content-Length: %d
                                 re.http_code = resp['finished']
                                 raise re
 
-                        mt = bytes(resp_mimetype, 'utf-8')
-                        writer.write(self._HTTP_200_CHUNKED_OK % mt)
+                        if events:
+                            writer.write(self._HTTP_200_EVENT_STREAM_OK)
+                        else:
+                            mt = bytes(resp_mimetype, 'utf-8')
+                            writer.write(self._HTTP_200_CHUNKED_OK % mt)
 
-                    data = enc(resp)
-                    writer.write(self._HTTP_CHUNK_BEG % len(data))
-                    writer.write(data)
-                    writer.write(self._HTTP_CHUNK_END)
-
+                    send_chunk(writer, enc(resp))
                     await writer.drain()
                     first = False
 
-                # Send an empty chunk, to delimit a completed stream
-                writer.write(self._HTTP_CHUNK_BEG % 0)
-                writer.write(self._HTTP_CHUNK_END)
-                # FIXME: This needs documenting!
+                if not events:
+                    # Send an empty chunk, to delimit a completed stream
+                    # FIXME: This needs documenting!
+                    send_chunk(writer, b'')
 
             except (IOError, BrokenPipeError) as exc:
                 self.debug('Broken pipe: %s' % exc)
@@ -1244,9 +1288,8 @@ Content-Length: %d
                     writer.write(self._HTTP_MIMETYPE % mt)
                     writer.write(data)
                 else:
-                    writer.write(self._HTTP_CHUNK_BEG % len(data))
-                    writer.write(data)
-                    writer.write(self._HTTP_CHUNK_END)
+                    send_chunk(writer, data)
+                    # Deliberatly not sending the completed marker, we exploded
 
         return raw_method
 

@@ -43,8 +43,8 @@ class PublicKitten(RPCKitten):
         return upk
 
     async def init_servers(self, servers):
-        from .kitten import MyKitten
-        self.mykitten = await MyKitten(args=[
+        from .htmx import HtmxKitten
+        self.mykitten = await HtmxKitten(args=[
             '--app-name=%s' % self.config.app_name]).connect(auto_start=True)
 
         upk = self.upagekite = await self.init_upagekite(self.mykitten.api_addr)
