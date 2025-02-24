@@ -198,6 +198,9 @@ In the case of the generator function,
 the HTTP response uses
 [chunked encoding](https://en.wikipedia.org/wiki/Chunked_transfer_encoding),
 with one chunk per yielded purr.
+Kettlingar also supports [Server Sent Events](https://en.wikipedia.org/wiki/Server-sent_events)
+in generator functions,
+as illustrated in [the htmx example](examples/htmx.py).
 
 
 # Is this a web server?
