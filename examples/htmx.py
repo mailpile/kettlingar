@@ -63,11 +63,9 @@ class HtmxKitten(MyKitten):
 
         This is a Server Sent Events endpoint which will send a few events
         to the client before cleanly shutting down.
-
-        This end-point does not work well with the CLI, it's web-only.
         """
-        # Yielding the text/event-stream mime type tells kettlingar this
-        # is a Server Sent Events endpoint, not a chunked generator.
+        # Yielding the text/event-stream MIME-type tells kettlingar this
+        # is a Server Sent Events endpoint.
         yield 'text/event-stream', {'event': 'startup', 'data': 'Here we go!'}
 
         # Send some hellos...
@@ -79,7 +77,7 @@ class HtmxKitten(MyKitten):
 
         # OK, that's enough!
         await asyncio.sleep(1)
-        yield None, {'event': 'hello', 'data': 'Goodbye\nworld!'}
+        yield None, {'event': 'hello', 'data': 'Goodbye\ncruel\nworld!'}
 
         # Without this, the page will reconnect automatically.
         yield None, {'event': 'eom', 'data': 'eom'}

@@ -845,6 +845,45 @@ class RPCKitten:
     def _log_more(self, *ignored):
         pass  # FIXME
 
+    def to_server_sent_event(self, event):
+        """
+        Serializes the data to a Server Sent Event, returning the event as bytes.
+
+        Override this if you need de/serialization for app-specific data.
+        """
+        chunk = []
+        for key in ('id', 'event', 'retry'):
+            val = event.pop(key, None)
+            if val is not None:
+                chunk.append(bytes('%s: %s' % (key, val), 'utf-8'))
+
+        data = event.pop('data', event)
+        if data:
+            if isinstance(data, str):
+                data = bytes(data, 'utf-8')
+            if not isinstance(data, bytes):
+                data = self.to_json(data)
+            for line in data.splitlines():
+                chunk.append(b'data: %s' % line)
+
+        chunk.append(b'\n')
+        return b'\n'.join(chunk)
+
+    def from_server_sent_event(self, ed):
+        """
+        Deserialize Server Sent Events, returning the event data as a dict.
+
+        Override this if you need de/serialization for app-specific data.
+        """
+        event = {}
+        for l in str(ed, 'utf-8').rstrip().splitlines():
+            k, v = l.split(': ', 1)
+            if k in event:
+                event[k] += '\n' + v
+            else:
+                event[k] = v
+        return event
+
     def to_json(self, data):
         """
         Serializes the data to JSON, returning the generated JSON as bytes.
@@ -1077,6 +1116,8 @@ Content-Length: %d
                         result = self.from_msgpack(body)
                     elif ctype == 'application/json':
                         result = self.from_json(body)
+                    elif ctype == 'text/event-stream':
+                        result = self.from_server_sent_event(body)
                     else:
                         result = {'mimetype': ctype, 'data': body}
                 if rfds:
@@ -1146,6 +1187,8 @@ Content-Length: %d
             decode = self.from_msgpack
         elif ctype == 'application/json':
             decode = self.from_json
+        elif ctype == 'text/event-stream':
+            decode = self.from_server_sent_event
         else:
             decode = lambda v: v
 
@@ -1208,25 +1251,6 @@ Content-Length: %d
             writer.write(data)
         writer.write(self._HTTP_CHUNK_END)
 
-    def _send_server_event(self, writer, event):
-        chunk = []
-        for key in ('id', 'event', 'retry'):
-            val = event.pop(key, None)
-            if val is not None:
-                chunk.append(bytes('%s: %s' % (key, val), 'utf-8'))
-
-        data = event.pop('data', event)
-        if data:
-            if isinstance(data, str):
-                data = bytes(data, 'utf-8')
-            if not isinstance(data, bytes):
-                data = self.to_json(data)
-            for line in data.splitlines():
-                chunk.append(b'data: %s' % line)
-
-        chunk.append(b'\n')
-        writer.write(b'\n'.join(chunk))
-
     def _wrap_async_generator(self, api_method):
         # Use chunked encoding or text/event-stream to send multiple results
         class RemoteError(Exception):
@@ -1237,7 +1261,6 @@ Content-Length: %d
             resp_mimetype = request_info.mimetype
             events = False
             first = True
-            send_chunk = self._send_chunked
             try:
                 async for m, r in api_method(request_info, *args, **kwargs):
                     mimetype, resp = m, r
@@ -1246,9 +1269,8 @@ Content-Length: %d
 
                     if mimetype and first:
                         resp_mimetype = mimetype
-                        enc = lambda v: v
-                        if resp_mimetype == 'text/event-stream':
-                            events = send_chunk = self._send_server_event
+                        if mimetype == 'text/event-stream':
+                            events = enc = self.to_server_sent_event
 
                     if first:
                         if not mimetype and isinstance(resp, dict):
@@ -1257,38 +1279,37 @@ Content-Length: %d
                                 re.http_code = resp['finished']
                                 raise re
 
-                        if events:
-                            writer.write(self._HTTP_200_EVENT_STREAM_OK)
-                        else:
-                            mt = bytes(resp_mimetype, 'utf-8')
-                            writer.write(self._HTTP_200_CHUNKED_OK % mt)
+                        mt = bytes(resp_mimetype, 'utf-8')
+                        writer.write(self._HTTP_200_CHUNKED_OK % mt)
 
-                    send_chunk(writer, enc(resp))
+                    self._send_chunked(writer, enc(resp))
                     await writer.drain()
                     first = False
 
-                if not events:
-                    # Send an empty chunk, to delimit a completed stream
-                    # FIXME: This needs documenting!
-                    send_chunk(writer, b'')
+                # Send an empty chunk, to delimit a completed stream
+                # FIXME: This needs documenting!
+                self._send_chunked(writer, b'')
 
             except (IOError, BrokenPipeError) as exc:
                 self.debug('Broken pipe: %s' % exc)
             except Exception as e:
-                data = enc({'error': str(e)})
+                data = {'error': str(e)}
+                if request_info.authed:
+                    data['traceback'] = traceback.format_exc()
+                if events:
+                    data = {'event': 'error', 'data': data}
                 if first:
-                    http_resp = self._HTTP_RESPONSE[500]
                     try:
                         http_resp = self._HTTP_RESPONSE[int(e.http_code)]
                     except (AttributeError, ValueError, KeyError):
-                        pass
+                        http_resp = self._HTTP_RESPONSE[500]
 
                     mt = bytes(resp_mimetype, 'utf-8')
                     writer.write(http_resp)
                     writer.write(self._HTTP_MIMETYPE % mt)
-                    writer.write(data)
+                    writer.write(enc(data))
                 else:
-                    send_chunk(writer, data)
+                    self._send_chunked(writer, enc(data))
                     # Deliberatly not sending the completed marker, we exploded
 
         return raw_method
@@ -1439,6 +1460,7 @@ Content-Length: %d
             print(str(self.to_json(result), 'utf-8'))
         elif isinstance(result, bytearray):
             sys.stdout.buffer.write(result)
+            sys.stdout.buffer.flush()
         else:
             print(self.TextFormat(result) % result)
 
