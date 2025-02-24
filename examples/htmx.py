@@ -77,7 +77,7 @@ class HtmxKitten(MyKitten):
 
         # OK, that's enough!
         await asyncio.sleep(1)
-        yield None, {'event': 'hello', 'data': 'Goodbye\ncruel\nworld!'}
+        yield None, {'event': 'hello', 'data': 'Goodbye\ncruel\nworld!\n\n'}
 
         # Without this, the page will reconnect automatically.
         yield None, {'event': 'eom', 'data': 'eom'}

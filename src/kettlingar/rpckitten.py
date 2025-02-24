@@ -865,6 +865,8 @@ class RPCKitten:
                 data = self.to_json(data)
             for line in data.splitlines():
                 chunk.append(b'data: %s' % line)
+            if data.endswith(b'\n'):
+                chunk.append(b'data: ')
 
         chunk.append(b'\n')
         return b'\n'.join(chunk)
@@ -877,11 +879,11 @@ class RPCKitten:
         """
         event = {}
         for l in str(ed, 'utf-8').rstrip().splitlines():
-            k, v = l.split(': ', 1)
+            k, v = l.split(':', 1)
             if k in event:
-                event[k] += '\n' + v
+                event[k] += '\n' + v[1:]
             else:
-                event[k] = v
+                event[k] = v[1:]
         return event
 
     def to_json(self, data):
