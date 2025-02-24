@@ -101,10 +101,6 @@ class RPCKitten:
                    b'Transfer-Encoding: chunked\n'
                    b'Content-Type: %s\n'
                    b'Connection: close\n\n')
-    _HTTP_200_EVENT_STREAM_OK = (b'HTTP/1.1 200 OK\n'
-                   b'Content-Type: text/event-stream\n'
-                   b'Cache-Control: no-cache\n'
-                   b'Connection: close\n\n')
     _HTTP_200_STATIC_PONG = (b'HTTP/1.1 200 OK\n'
                    b'Content-Type: text/plain\n'
                    b'Connection: close\n\nPong\n')
