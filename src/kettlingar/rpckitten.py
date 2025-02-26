@@ -1329,6 +1329,16 @@ Content-Length: %d
 
         return raw_method
 
+    async def public_raw_websocket(self, request_info):
+        """/websocket
+
+        Create a persistent websocket connection.
+        """
+        # Check headers; if they match
+        # Send back websocket Upgrade: headers etc
+        # ...
+        raise RuntimeError('FIXME: Not implemented')
+
     async def public_raw_ping(self, request_info, **kwa):
         """/ping
 
