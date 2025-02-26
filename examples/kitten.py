@@ -1,9 +1,10 @@
 import asyncio
 
 from kettlingar import RPCKitten
+from kettlingar.metrics import RPCKittenVarz
 
 
-class MyKitten(RPCKitten):
+class MyKitten(RPCKitten, RPCKittenVarz):
     """mykitten - A sample kettlingar microservice
 
     This microservice knows how to meow and how to purr. Purring is

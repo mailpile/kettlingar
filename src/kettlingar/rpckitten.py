@@ -42,6 +42,7 @@ class RequestInfo:
     def __init__(self,
             peer=None,
             authed=False,
+            reader=None,
             writer=None,
             mimetype=None,
             encoder=None,
@@ -52,6 +53,7 @@ class RequestInfo:
             fds=None):
         self.peer = peer
         self.authed = authed
+        self.reader = reader
         self.writer = writer
         self.mimetype = mimetype
         self.encoder = encoder
@@ -263,8 +265,10 @@ class RPCKitten:
 
             return unconsumed
 
-    def __init__(self, config=None, args=None):
-        super().__init__()
+    def __init__(self, **kwargs):
+        args = kwargs.pop('args', None)
+        config = kwargs.pop('config', None)
+        super().__init__(**kwargs)  # Cooperate with mixins
 
         if config is None:
             config = self.Configuration()
@@ -289,8 +293,6 @@ class RPCKitten:
         self.is_client = True
         self.is_service = False
         self._convenience_methods = set()
-        self._remote_convenience_methods()
-        self._init_logging()
 
     def _command_fullargspec(self, command):
         for prefix in ('public_api_', 'public_raw_', 'api_', 'raw_'):
@@ -389,6 +391,9 @@ class RPCKitten:
         Establish a connection with the running service, optionally
         launching the service if it isn't yet running.
         """
+        self._remote_convenience_methods()
+        self._init_logging()
+
         for tried in range(0, retry + 1):
             try:
                 with open(self._urlfile, 'r') as fd:
@@ -582,6 +587,9 @@ class RPCKitten:
 
         return header, headers, request[hend+2:], fds
 
+    def _make_request_info(self, **kwargs):
+        return RequestInfo(**kwargs)
+
     async def _serve_http(self, reader, writer):
         def _w(*data):
             data = b''.join(
@@ -589,6 +597,7 @@ class RPCKitten:
             writer.write(data)
             return len(data)
 
+        t0 = time.time()
         code = 500
         fds_ok = False
         method = path = version = ''
@@ -613,8 +622,9 @@ class RPCKitten:
                 authed = False
 
             (writer, code, mimetype, response
-                ) = await self._handle_http_request(RequestInfo(
+                ) = await self._handle_http_request(self._make_request_info(
                     peer=peer,
+                    reader=reader,
                     writer=writer,
                     authed=authed,
                     method=method,
@@ -624,8 +634,7 @@ class RPCKitten:
                     fds=fds))
 
             if mimetype is None and response is None:
-                sent = '-'
-                writer = None
+                sent = writer = None
             elif str(mimetype, 'utf-8') == self.FDS_MIMETYPE:
                 if not fds_ok:
                     raise ValueError('Cannot send file descriptors over TCP')
@@ -665,13 +674,21 @@ class RPCKitten:
                     'traceback': traceback.format_exc()}))
             self.exception('Error serving %s: %s', method, e)
         finally:
-            log_func = self.debug if (200 <= code < 300) else self.warning
-            log_func('HTTP %s %s %d %s %s',
-                method, path, code, sent,
-                ':'.join(str(i) for i in peer[:2]))
-            if writer:
+            try:
                 await writer.drain()
                 writer.close()
+            except:
+                pass
+
+            peer = ':'.join(str(i) for i in peer[:2])
+            elapsed_us = int(1000000 * (time.time() - t0)) if sent else None
+
+            log_func = self.debug if (200 <= code < 300) else self.warning
+            log_func('HTTP %s %s %d %s %s %s',
+                method, path, code, sent or '-', elapsed_us or '-', peer)
+
+            if hasattr(self, 'metrics_http_request'):
+                self.metrics_http_request(method, path, code, sent, elapsed_us, peer)
 
     async def validate_request_header(self, path, header):
         """
@@ -1501,7 +1518,7 @@ Content-Length: %d
             print_json = _extract_bool_arg(args, '--json')
             print_raw = _extract_bool_arg(args, '--raw')
 
-            self = cls(config)
+            self = cls(config=config)
             name = '%s/%s' % (config.app_name, self.name)
             command = args.pop(0)
 
@@ -1585,24 +1602,3 @@ Content-Length: %d
 
         asyncio.run(task)
 
-
-class RPCKittenVarz:
-    def _get_stats(self, public):
-        sname = 'stats_%s' % ('public' if public else 'private')
-        stats = getattr(self, sname, {})
-        setattr(self, sname, stats)
-        return stats
-
-    def count(self, key, cnt, public=False):
-        stats = self._get_stats()
-        stats[key] = stats.get(key, 0) + 1
-
-    async def public_api_varz(self, request_info):
-        if request_info.method != 'GET':
-            raise PermissionError('Nope')
-        varz = {}
-        if hasattr(self, 'stats_public'):
-            varz.update(self.stats_public)
-        if hasattr(self, 'stats_private') and headers['_AUTHED']:
-            varz.update(self.stats_private)
-        return None, varz
