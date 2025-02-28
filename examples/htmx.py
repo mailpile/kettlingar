@@ -45,7 +45,17 @@ SINGLE_PAGE_APP = """\
 
 
 class HtmxKitten(MyKitten):
-    # Inherits /meow and /purr etc.
+    """htmxkitten - A sample kettlingar HTMX app
+
+    Inheriting from MyKitten, this microservice knows how to meow and
+    how to purr. Purring is private and requires authentication, and
+    may go on for a while.
+
+    There is also a public HTMX document served at / to demonstrate
+    how to use HTMX kettlingar as a back-end for HTMX pages.
+    """
+    class Configuration(MyKitten.Configuration):
+        WORKER_NAME = 'HTMXKitten'
 
     async def public_api_web_root(self, request_info):
         """/

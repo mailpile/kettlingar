@@ -71,13 +71,18 @@ class RPCKittenVarz:
         sent = sent or request_info.sent
         for prefix in ('http', request_info.handler):
             self.metrics_count(prefix + '_%d' % request_info.code,
-                public=True)
+                public=(prefix == 'http'))
+
+            is_unix_domain = (request_info.peer[0] == self.PEER_UNIX_DOMAIN)
+            self.metrics_count(prefix + ('_unix' if is_unix_domain else '_tcp'),
+                public=False)
+
             if sent:
                 self.metrics_count(prefix + '_sent_bytes', sent,
-                    public=True)
+                    public=(prefix == 'http'))
             if elapsed_us:
                 self.metrics_sample(prefix + '_elapsed_us', elapsed_us,
-                    public=True)
+                    public=(prefix == 'http'))
 
     async def public_api_varz(self, request_info):
         """/varz

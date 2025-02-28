@@ -99,6 +99,7 @@ class RPCKitten:
 
     FDS_MIMETYPE = 'application/x-fd-magic'
     REPLY_TO_FIRST_FD = 'reply_to_first_fd'
+    PEER_UNIX_DOMAIN = 'unix-domain'
 
     CALL_USE_JSON   = 'call_use_json'
     CALL_REPLY_TO   = 'call_reply_to'
@@ -528,7 +529,7 @@ class RPCKitten:
             if self.config.worker_use_tcp:
                 sock_desc, self._sock = self._make_server_socket()
             else:
-                sock_desc = 'unix-domain:0'
+                sock_desc = self.PEER_UNIX_DOMAIN + ':0'
 
             self._url = self._make_url(sock_desc)
             with open(self._urlfile, 'w') as fd:
@@ -621,7 +622,7 @@ class RPCKitten:
             method, path, version = head.split(None, 3)[:3]
             peer = writer._transport._sock.getpeername()
             if not peer:
-                peer = ['unix-domain']
+                peer = [self.PEER_UNIX_DOMAIN]
                 fds_ok = True
 
             req.peer = peer
@@ -1102,7 +1103,7 @@ class RPCKitten:
         """
         t0 = time.time()
 
-        use_json = kwargs.pop(self.CALL_USE_JSON, False)
+        use_json = self.Bool(kwargs.pop(self.CALL_USE_JSON, False))
 
         reply_to = kwargs.pop(self.CALL_REPLY_TO, None)
         if reply_to:
@@ -1113,8 +1114,8 @@ class RPCKitten:
             args = [reply_to] + list(args)
             kwargs[self.REPLY_TO_FIRST_FD] = True
 
-        allow_unix = kwargs.pop(self.CALL_ALLOW_UNIX, True)
-        retries = kwargs.pop(self.CALL_MAX_TRIES, 2)
+        allow_unix = self.Bool(kwargs.pop(self.CALL_ALLOW_UNIX, True))
+        retries = int(kwargs.pop(self.CALL_MAX_TRIES, 2))
         for attempt in range(0, retries + 1):
             try:
                 url = self._url +'/'+ fn
@@ -1477,6 +1478,20 @@ Content-Length: %d
             return None, doc(raw_command)
 
         return None, doc(None)
+
+    @classmethod
+    def Bool(cls, value):
+        """
+        This is a convenience method for API functions to convert an
+        incoming argument to boolean. It recognizes the strings
+        "1", "true", "t", "yes" and "y" as True values. Anything else
+        is considered to be False.
+        """
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            return value.lower() in ('true', 't', 'yes', 'y', '1')
+        return bool(value)
 
     @classmethod
     def extract_kwargs(cls, args, allowed=None):
