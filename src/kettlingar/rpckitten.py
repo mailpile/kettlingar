@@ -107,6 +107,8 @@ class RPCKitten:
     CALL_MAX_TRIES  = 'call_max_tries'
     CALL_ALLOW_UNIX = 'call_allow_unix'
 
+    TRUE_STRINGS = ['true', 't', 'yes', 'y', '1']
+
     _HTTP_200_OK = (b'HTTP/1.1 200 OK\n'
                    b'Content-Type: %s\n'
                    b'Connection: close\n\n')
@@ -253,7 +255,7 @@ class RPCKitten:
                         if val == '':
                             val = dflt
                         elif isinstance(dflt, bool):
-                            val = val[:1] in ('y', 'Y', 't', 'T', '1')
+                            val = RPCKitten.Bool(val[:1])
                         elif isinstance(dflt, float):
                             val = float(val)
                         elif isinstance(dflt, int):
@@ -1491,7 +1493,7 @@ Content-Length: %d
         if isinstance(value, bool):
             return value
         if isinstance(value, str):
-            return value.lower() in ('true', 't', 'yes', 'y', '1')
+            return value.lower() in cls.TRUE_STRINGS
         return bool(value)
 
     @classmethod
