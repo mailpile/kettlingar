@@ -4,13 +4,17 @@ import copy
 import inspect
 import json
 import logging
-import msgpack
 import os
 import socket
 import sys
 import time
 import traceback
 import urllib.parse
+
+try:
+    import msgpack
+except ImportError:
+    msgpack = None
 
 try:
     from setproctitle import setproctitle
@@ -707,7 +711,7 @@ class RPCKitten:
         if sent is False:
             elapsed_us = None
         else:
-            elapsed_us = int(1000000 * (time.time() - req.t0))
+            elapsed_us = int(1e6 * (time.time() - req.t0))
 
         peer = ':'.join(str(i) for i in req.peer[:2])
 
@@ -1106,7 +1110,8 @@ class RPCKitten:
         """
         t0 = time.time()
 
-        use_json = self.Bool(kwargs.pop(self.CALL_USE_JSON, False))
+        use_json = (self.Bool(kwargs.pop(self.CALL_USE_JSON, False))
+            or (msgpack is None))
 
         reply_to = kwargs.pop(self.CALL_REPLY_TO, None)
         if reply_to:
@@ -1283,10 +1288,7 @@ Content-Length: %d
     def _wrap_drain_and_close(self, raw_method):
         async def draining_raw_method(request_obj, *args, **kwargs):
             try:
-                await raw_method(request_obj, *args, **kwargs)
-                # As we may be passing the underlying file descriptor to
-                # another worker, try not to be too hasty about closing.
-                return await asyncio.sleep(0.01)
+                return await raw_method(request_obj, *args, **kwargs)
             except Exception as e:
                 err = {'error': str(e)}
                 if request_obj.authed:
@@ -1301,9 +1303,12 @@ Content-Length: %d
                     await request_obj.writer.drain()
                 except:
                     pass
-                # Defer this slightly, again avoiding premature closing
-                asyncio.get_running_loop().call_soon(request_obj.writer.close)
                 self._log_http_request(request_obj, sent=request_obj.sent)
+
+                # As we may be passing the underlying file descriptor to
+                # another worker, try not to be too hasty about closing.
+                await asyncio.sleep(0.01)
+                asyncio.get_running_loop().call_soon(request_obj.writer.close)
         return draining_raw_method
 
     def _send_chunked(self, request_obj, data):
@@ -1589,6 +1594,7 @@ Content-Length: %d
             print_json = _extract_bool_arg(args, '-j', '--json')
             print_raw = _extract_bool_arg(args, '-r', '--raw')
             no_unix = _extract_bool_arg(args, '-t', '--tcp')
+            no_msgpack = _extract_bool_arg(args, '-J', '--json-rpc')
 
             self = cls(config=config)
             name = '%s/%s' % (config.app_name, self.name)
@@ -1605,6 +1611,8 @@ Content-Length: %d
                     allowed=self._command_kwargs(command))
                 if no_unix:
                     kwargs[self.CALL_ALLOW_UNIX] = False
+                if no_msgpack:
+                    kwargs[self.CALL_USE_JSON] = True
 
                 if command == 'help':
                     _, result = await self.api_help(None, *args, **kwargs)
