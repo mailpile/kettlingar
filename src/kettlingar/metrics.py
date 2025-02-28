@@ -73,9 +73,8 @@ class RPCKittenVarz:
             self.metrics_count(prefix + '_%d' % request_info.code,
                 public=(prefix == 'http'))
 
-            is_unix_domain = (request_info.peer[0] == self.PEER_UNIX_DOMAIN)
-            self.metrics_count(prefix + ('_unix' if is_unix_domain else '_tcp'),
-                public=False)
+            via = '_unix' if request_info.via_unix_domain else '_tcp'
+            self.metrics_count(prefix + via, public=False)
 
             if sent:
                 self.metrics_count(prefix + '_sent_bytes', sent,

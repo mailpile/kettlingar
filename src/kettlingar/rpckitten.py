@@ -70,6 +70,7 @@ class RequestInfo:
 
     socket = property(lambda s: s.writer._transport._sock)
     fileno = property(lambda s: s.writer._transport._sock.fileno())
+    via_unix_domain = property(lambda s: s.peer[0] == RPCKitten.PEER_UNIX_DOMAIN)
 
     def write(req, *data, writer=None):
         data = b''.join(
