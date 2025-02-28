@@ -50,7 +50,9 @@ class RequestInfo:
             headers=None,
             path=None,
             body=None,
-            fds=None):
+            fds=None,
+            t0=None):
+        self.t0 = t0 or time.time()
         self.peer = peer
         self.authed = authed
         self.reader = reader
@@ -62,9 +64,19 @@ class RequestInfo:
         self.path = path
         self.body = body
         self.fds = [] if (fds is None) else fds
+        self.sent = 0
+        self.code = 500  # Failing to update this is an error
+        self.handler = None
 
     socket = property(lambda s: s.writer._transport._sock)
     fileno = property(lambda s: s.writer._transport._sock.fileno())
+
+    def write(req, *data, writer=None):
+        data = b''.join(
+            (bytes(d, 'utf-8') if isinstance(d, str) else d) for d in data)
+        (writer or req.writer).write(data)
+        req.sent += len(data)
+        return len(data)
 
 
 class RPCKitten:
@@ -291,6 +303,7 @@ class RPCKitten:
         self._secret = None
         self._process = None
 
+        self.start_time = None
         self.is_client = True
         self.is_service = False
         self._convenience_methods = set()
@@ -588,18 +601,19 @@ class RPCKitten:
 
         return header, headers, request[hend+2:], fds
 
-    def _make_request_info(self, **kwargs):
+    def _make_request_obj(self, **kwargs):
         return RequestInfo(**kwargs)
 
     async def _serve_http(self, reader, writer):
+        req = self._make_request_obj(reader=reader, writer=writer)
+
         def _w(*data):
-            data = b''.join(
-                (bytes(d, 'utf-8') if isinstance(d, str) else d) for d in data)
-            writer.write(data)
-            return len(data)
+            # Make sure we keep writing to the original writer, even if
+            # the request_obj target changes (response redirection).
+            return req.write(*data, writer=writer)
 
         t0 = time.time()
-        code = 500
+        sent = 0
         fds_ok = False
         method = path = version = ''
         try:
@@ -610,6 +624,12 @@ class RPCKitten:
                 peer = ['unix-domain']
                 fds_ok = True
 
+            req.peer = peer
+            req.method = method
+            req.headers = hdrs
+            req.body = body
+            req.fds = fds
+
             try:
                 if self.config.worker_url_path:
                     if path.startswith('/' + self.config.worker_url_path):
@@ -618,24 +638,16 @@ class RPCKitten:
                         raise AttributeError()
 
                 path = await self.validate_request_header(path, head)
-                authed = True
+                req.authed = True
             except PermissionError:
-                authed = False
+                req.authed = False
+            req.path = path
 
-            (writer, code, mimetype, response
-                ) = await self._handle_http_request(self._make_request_info(
-                    peer=peer,
-                    reader=reader,
-                    writer=writer,
-                    authed=authed,
-                    method=method,
-                    headers=hdrs,
-                    path=path,
-                    body=body,
-                    fds=fds))
+            (writer, req.code, mimetype, response
+                ) = await self._handle_http_request(req)
 
             if mimetype is None and response is None:
-                sent = writer = None
+                sent = writer = False
             elif str(mimetype, 'utf-8') == self.FDS_MIMETYPE:
                 if not fds_ok:
                     raise ValueError('Cannot send file descriptors over TCP')
@@ -648,27 +660,30 @@ class RPCKitten:
                     self.to_json([self._fd_to_magic_arg(a) for a in response]))
 
                 await self._send_data_and_fds(writer, http_res, fd_list)
+                req.sent += len(http_res)
+                sent += len(http_res)
             else:
-                l1 = (self._HTTP_RESPONSE.get(code) or
-                    (self._HTTP_RESPONSE_UNKNOWN % code))
+                l1 = (self._HTTP_RESPONSE.get(req.code) or
+                    (self._HTTP_RESPONSE_UNKNOWN % req.code))
                 sent = _w(l1, (self._HTTP_MIMETYPE % mimetype), response)
 
         except PermissionError:
-            code = 403
-            sent = _w(self._HTTP_RESPONSE[code], self._HTTP_SORRY)
+            req.code = 403
+            sent = _w(self._HTTP_RESPONSE[req.code], self._HTTP_SORRY)
         except AttributeError:
-            code = 404
-            sent = _w(self._HTTP_RESPONSE[code], self._HTTP_NOT_FOUND)
+            req.code = 404
+            sent = _w(self._HTTP_RESPONSE[req.code], self._HTTP_NOT_FOUND)
         except (TypeError, UnicodeDecodeError) as e:
-            code = 400
+            req.code = 400
             sent = _w(
-                self._HTTP_RESPONSE[code],
+                self._HTTP_RESPONSE[req.code],
                 self._HTTP_JSON,
                 self.to_json({'error': str(e)}))
+            self.exception('Error serving %s: %s', method, e)
         except Exception as e:
-            code = 500
+            req.code = 500
             sent = _w(
-                self._HTTP_RESPONSE[code],
+                self._HTTP_RESPONSE[req.code],
                 self._HTTP_JSON,
                 self.to_json({
                     'error': str(e),
@@ -676,20 +691,34 @@ class RPCKitten:
             self.exception('Error serving %s: %s', method, e)
         finally:
             try:
-                await writer.drain()
-                writer.close()
+                if writer:
+                    await writer.drain()
+                    writer.close()
             except:
                 pass
+            if sent is not False:
+                self._log_http_request(req, sent=sent)
 
-            peer = ':'.join(str(i) for i in peer[:2])
-            elapsed_us = int(1000000 * (time.time() - t0)) if sent else None
+    def _log_http_request(self, req, sent=None):
+        if sent is False:
+            elapsed_us = None
+        else:
+            elapsed_us = int(1000000 * (time.time() - req.t0))
 
-            log_func = self.debug if (200 <= code < 300) else self.warning
-            log_func('HTTP %s %s %d %s %s %s',
-                method, path, code, sent or '-', elapsed_us or '-', peer)
+        peer = ':'.join(str(i) for i in req.peer[:2])
 
-            if hasattr(self, 'metrics_http_request'):
-                self.metrics_http_request(method, path, code, sent, elapsed_us, peer)
+        log_func = self.debug if (200 <= req.code < 300) else self.warning
+        log_func('HTTP %s %s %d %s %s %s',
+            req.method, req.path, req.code,
+            sent or '-',
+            elapsed_us or '-',
+            peer)
+
+        # FIXME: We shouldn't need to hard-code this?
+        if hasattr(self, 'metrics_http_request'):
+            self.metrics_http_request(req,
+                sent=(sent or False),
+                elapsed_us=elapsed_us)
 
     async def validate_request_header(self, path, header):
         """
@@ -705,17 +734,17 @@ class RPCKitten:
             return path[len(self._secret) + 1:]
         return path
 
-    def get_method_name(self, request_info):
+    def get_method_name(self, request_obj):
         """
         This function derives the basic method name (e.g. `ping`), from
-        `request_info.path`. It returns the first component of the path,
+        `request_obj.path`. It returns the first component of the path,
         or the name `web_root` if the path is empty (`/`).
 
         Subclasses can override this to implement their own routing logic.
         """
-        return request_info.path[1:].split('/', 1)[0] or 'web_root'
+        return request_obj.path[1:].split('/', 1)[0] or 'web_root'
 
-    def get_default_methods(self, request_info):
+    def get_default_methods(self, request_obj):
         """
         If the default function lookup mechanism fails, this function is
         called as a last-resort effort to route the request. By default
@@ -725,16 +754,17 @@ class RPCKitten:
         of (api_method, raw_method), one of which should be `None` and the
         other an async API method function.
         """
-        exc = (AttributeError if request_info.authed else PermissionError)
-        raise exc(request_info.path)
+        exc = (AttributeError if request_obj.authed else PermissionError)
+        raise exc(request_obj.path)
 
-    async def _handle_http_request(self, request_info):
+    async def _handle_http_request(self, request_obj):
         def _b(v):
             return v if isinstance(v, bytes) else bytes(v, 'utf-8')
 
-        authed = request_info.authed
-        writer = request_info.writer
-        method_name = self.get_method_name(request_info)
+        authed = request_obj.authed
+        writer = request_obj.writer
+        method_name = self.get_method_name(request_obj)
+
         if authed:
             raw_method = getattr(self, 'raw_' + method_name, None)
             api_method = getattr(self, 'api_' + method_name, None)
@@ -746,25 +776,30 @@ class RPCKitten:
             api_method = getattr(self, 'public_api_' + method_name, None)
 
         if not raw_method and not api_method:
-            api_method, raw_method = self.get_default_methods(request_info)
+            api_method, raw_method = self.get_default_methods(request_obj)
+
+        if raw_method:
+            request_obj.handler = raw_method.__name__
+        else:
+            request_obj.handler = api_method.__name__
 
         args, kwargs = [], {}
-        mt = request_info.mimetype = 'application/json'
-        enc = request_info.encoder = self.to_json
-        if request_info.method == 'POST':
-            ctype = request_info.headers['Content-Type']
+        mt = request_obj.mimetype = 'application/json'
+        enc = request_obj.encoder = self.to_json
+        if request_obj.method == 'POST':
+            ctype = request_obj.headers['Content-Type']
             if ctype == 'application/x-msgpack':
-                request_info.mimetype = mt = ctype
-                request_info.encoder = enc = self.to_msgpack
-                body = request_info.body = self.from_msgpack(request_info.body)
+                request_obj.mimetype = mt = ctype
+                request_obj.encoder = enc = self.to_msgpack
+                body = request_obj.body = self.from_msgpack(request_obj.body)
                 args = body.pop('_args', [])
                 kwargs = body
             elif ctype == 'application/json':
-                body = request_info.body = self.from_json(request_info.body)
+                body = request_obj.body = self.from_json(request_obj.body)
                 args = body.pop('_args', [])
                 kwargs = body
             elif ctype == 'application/x-www-form-urlencoded':
-                body = str(request_info.body, 'utf-8').strip()
+                body = str(request_obj.body, 'utf-8').strip()
                 kwargs = urllib.parse.parse_qs(body)
                 for k in kwargs.keys():
                     if len(kwargs[k]) == 1:
@@ -773,33 +808,33 @@ class RPCKitten:
             else:
                 self.warning('Unhandled POST MIME type: %s' % ctype)
 
-        if request_info.fds:
-            args = [self._fd_from_magic_arg(a, request_info.fds) for a in args]
-            if request_info.body.pop(self.REPLY_TO_FIRST_FD, False):
+        if request_obj.fds:
+            args = [self._fd_from_magic_arg(a, request_obj.fds) for a in args]
+            if request_obj.body.pop(self.REPLY_TO_FIRST_FD, False):
                 fd = args.pop(0)
                 loop = asyncio.get_running_loop()
                 if isinstance(fd, socket.socket):
-                    _, writer2 = await asyncio.open_connection(sock=fd)
+                    _, writer = await asyncio.open_connection(sock=fd)
                 else:
-                    writer2 = FileWriter(fd)
-                writer.write(self._HTTP_202_REPLIED_TO_FIRST_FD)
-                await writer.drain()
-                writer.close()
-                request_info.writer = writer = writer2
+                    writer = FileWriter(fd)
+                request_obj.write(self._HTTP_202_REPLIED_TO_FIRST_FD)
+                await request_obj.writer.drain()
+                request_obj.writer.close()
+                request_obj.writer = writer
 
         if inspect.isasyncgenfunction(api_method):
             raw_method = self._wrap_async_generator(api_method)
 
         if raw_method is not None:
             _wrapped = self._wrap_drain_and_close(raw_method)
-            create_background_task(_wrapped(request_info, *args, **kwargs))
+            create_background_task(_wrapped(request_obj, *args, **kwargs))
             return writer, 200, None, None
 
         try:
-            mimetype, resp = await api_method(request_info, *args, **kwargs)
+            mimetype, resp = await api_method(request_obj, *args, **kwargs)
             if not mimetype:
-                mimetype = request_info.mimetype
-                resp = request_info.encoder(resp)
+                mimetype = request_obj.mimetype
+                resp = request_obj.encoder(resp)
 
             return writer, 200, _b(mimetype), resp
         except Exception as e:
@@ -827,6 +862,7 @@ class RPCKitten:
             path=self._unixfile)
 
     async def _main_httpd_loop(self):
+        self.start_time = int(time.time())
         if self.config.worker_use_tcp:
             self._servers.append(await self._start_server())
         if self.config.worker_use_unixdomain:
@@ -1241,48 +1277,48 @@ Content-Length: %d
         return decoded_chunk_generator
 
     def _wrap_drain_and_close(self, raw_method):
-        async def draining_raw_method(request_info, *args, **kwargs):
-            writer = request_info.writer
+        async def draining_raw_method(request_obj, *args, **kwargs):
             try:
-                await raw_method(request_info, *args, **kwargs)
+                await raw_method(request_obj, *args, **kwargs)
                 # As we may be passing the underlying file descriptor to
                 # another worker, try not to be too hasty about closing.
                 return await asyncio.sleep(0.01)
             except Exception as e:
                 err = {'error': str(e)}
-                if request_info.authed:
+                if request_obj.authed:
                     err['traceback'] = traceback.format_exc()
-                mt = bytes(request_info.mimetype, 'utf-8')
-                writer.write(self._HTTP_RESPONSE[500])
-                writer.write(self._HTTP_MIMETYPE % mt)
-                writer.write(request_info.encoder(err))
+                mt = bytes(request_obj.mimetype, 'utf-8')
+                request_obj.write(
+                    self._HTTP_RESPONSE[500],
+                    self._HTTP_MIMETYPE % mt,
+                    request_obj.encoder(err))
             finally:
                 try:
-                    await writer.drain()
+                    await request_obj.writer.drain()
                 except:
                     pass
                 # Defer this slightly, again avoiding premature closing
-                asyncio.get_running_loop().call_soon(writer.close)
+                asyncio.get_running_loop().call_soon(request_obj.writer.close)
+                self._log_http_request(request_obj, sent=request_obj.sent)
         return draining_raw_method
 
-    def _send_chunked(self, writer, data):
-        writer.write(self._HTTP_CHUNK_BEG % len(data))
-        if data:
-            writer.write(data)
-        writer.write(self._HTTP_CHUNK_END)
+    def _send_chunked(self, request_obj, data):
+        request_obj.write(
+            self._HTTP_CHUNK_BEG % len(data),
+            data,
+            self._HTTP_CHUNK_END)
 
     def _wrap_async_generator(self, api_method):
         # Use chunked encoding or text/event-stream to send multiple results
         class RemoteError(Exception):
             http_code = 500
-        async def raw_method(request_info, *args, **kwargs):
-            enc = request_info.encoder
-            writer = request_info.writer
-            resp_mimetype = request_info.mimetype
+        async def raw_method(request_obj, *args, **kwargs):
+            enc = request_obj.encoder
+            resp_mimetype = request_obj.mimetype
             events = False
             first = True
             try:
-                async for m, r in api_method(request_info, *args, **kwargs):
+                async for m, r in api_method(request_obj, *args, **kwargs):
                     mimetype, resp = m, r
                     if resp is None and mimetype is None:
                         return
@@ -1300,21 +1336,21 @@ Content-Length: %d
                                 raise re
 
                         mt = bytes(resp_mimetype, 'utf-8')
-                        writer.write(self._HTTP_200_CHUNKED_OK % mt)
+                        request_obj.write(self._HTTP_200_CHUNKED_OK % mt)
 
-                    self._send_chunked(writer, enc(resp))
-                    await writer.drain()
+                    self._send_chunked(request_obj, enc(resp))
+                    await request_obj.writer.drain()
                     first = False
 
                 # Send an empty chunk, to delimit a completed stream
                 # FIXME: This needs documenting!
-                self._send_chunked(writer, b'')
+                self._send_chunked(request_obj, b'')
 
             except (IOError, BrokenPipeError) as exc:
                 self.debug('Broken pipe: %s' % exc)
             except Exception as e:
                 data = {'error': str(e)}
-                if request_info.authed:
+                if request_obj.authed:
                     data['traceback'] = traceback.format_exc()
                 if events:
                     data = {'event': 'error', 'data': data}
@@ -1325,16 +1361,17 @@ Content-Length: %d
                         http_resp = self._HTTP_RESPONSE[500]
 
                     mt = bytes(resp_mimetype, 'utf-8')
-                    writer.write(http_resp)
-                    writer.write(self._HTTP_MIMETYPE % mt)
-                    writer.write(enc(data))
+                    request_obj.write(
+                        http_resp,
+                        self._HTTP_MIMETYPE % mt,
+                        enc(data))
                 else:
-                    self._send_chunked(writer, enc(data))
+                    self._send_chunked(request_obj, enc(data))
                     # Deliberatly not sending the completed marker, we exploded
 
         return raw_method
 
-    async def public_raw_websocket(self, request_info):
+    async def public_raw_websocket(self, request_obj):
         """/websocket
 
         Create a persistent websocket connection.
@@ -1344,32 +1381,30 @@ Content-Length: %d
         # ...
         raise RuntimeError('FIXME: Not implemented')
 
-    async def public_raw_ping(self, request_info, **kwa):
+    async def public_raw_ping(self, request_obj, **kwa):
         """/ping
 
         Check whether the microservice is running.
         """
-        writer = request_info.writer
-        if request_info.authed:
-            mt = request_info.mimetype
-            enc = request_info.encoder
-            body = request_info.body
+        if request_obj.authed:
+            mt = request_obj.mimetype
+            enc = request_obj.encoder
+            body = request_obj.body
             if not isinstance(body, dict):
                 body = {}
 
             body['pong'] = True
-            body['conn'] = str_addr(writer._transport._sock.getsockname())
+            body['conn'] = ':'.join(str(v) for v in request_obj.peer)
             body['_format'] = 'Pong via %(conn)s!'
 
-            writer.write((self._HTTP_200_OK % bytes(mt, 'utf-8')) + enc(body))
+            request_obj.write(
+                self._HTTP_200_OK % bytes(mt, 'utf-8'),
+                enc(body))
         else:
             # Not authed: do less work and don't let caller influence output
-            writer.write(self._HTTP_200_STATIC_PONG)
+            request_obj.write(self._HTTP_200_STATIC_PONG)
 
-        await writer.drain()
-        writer.close()
-
-    async def api_config(self, request_info):
+    async def api_config(self, request_obj):
         """/config
 
         Returns the current configuration.
@@ -1378,7 +1413,7 @@ Content-Length: %d
             'config': self.config.as_dict(),
             '_format': str(self.config).replace('%', '%%')}
 
-    async def api_quitquitquit(self, request_info):
+    async def api_quitquitquit(self, request_obj):
         """/quitquitquit
 
         Shut down the microservice.
@@ -1398,7 +1433,7 @@ Content-Length: %d
         """
         return getattr(method, '__doc__', None)
 
-    async def api_help(self, request_info, command=None):
+    async def api_help(self, request_obj, command=None):
         """/help [command]
 
         Returns docstring-based help for existing API methods, or an
