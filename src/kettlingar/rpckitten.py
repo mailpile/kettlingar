@@ -88,9 +88,10 @@ class RPCKitten:
     FDS_MIMETYPE = 'application/x-fd-magic'
     REPLY_TO_FIRST_FD = 'reply_to_first_fd'
 
-    CALL_USE_JSON = 'call_use_json'
-    CALL_REPLY_TO = 'call_reply_to'
-    CALL_MAX_TRIES = 'call_max_tries'
+    CALL_USE_JSON   = 'call_use_json'
+    CALL_REPLY_TO   = 'call_reply_to'
+    CALL_MAX_TRIES  = 'call_max_tries'
+    CALL_ALLOW_UNIX = 'call_allow_unix'
 
     _HTTP_200_OK = (b'HTTP/1.1 200 OK\n'
                    b'Content-Type: %s\n'
@@ -954,10 +955,10 @@ class RPCKitten:
         d = d if isinstance(d, (bytes, bytearray)) else bytes(d, 'latin-1')
         return msgpack.unpackb(d, ext_hook=_from_exttype)
 
-    async def _url_connect(self, url):
+    async def _url_connect(self, url, allow_unix=True):
         proto, _, host_port, path = url.split('/', 3)
 
-        allow_unix = bool(self._peeraddr or not self.config.worker_use_tcp)
+        allow_unix &= bool(self._peeraddr or not self.config.worker_use_tcp)
         if self._unixfile and allow_unix:
             try:
                 self._peeraddr = self._unixfile
@@ -1076,11 +1077,13 @@ class RPCKitten:
             args = [reply_to] + list(args)
             kwargs[self.REPLY_TO_FIRST_FD] = True
 
+        allow_unix = kwargs.pop(self.CALL_ALLOW_UNIX, True)
         retries = kwargs.pop(self.CALL_MAX_TRIES, 2)
         for attempt in range(0, retries + 1):
             try:
                 url = self._url +'/'+ fn
-                url_path, fds_ok, io_pair = await self._url_connect(url)
+                (url_path, fds_ok, io_pair
+                    ) = await self._url_connect(url, allow_unix)
                 break
             except:
                 if attempt >= retries:
@@ -1166,13 +1169,15 @@ Content-Length: %d
                 'CALL %s(%s)%s %s %.2fms',
                 fn, str_args(args), fds, resp_code, rtime)
 
-    async def ping(self):
+    async def ping(self, allow_unix=True):
         """
         Check whether the service is running.
         """
         if self.is_client:
             self._peeraddr = None
-            return await self.call('ping', call_max_tries=0)
+            return await self.call('ping',
+                call_max_tries=0,
+                call_allow_unix=allow_unix)
         else:
             return {'pong': True, 'loopback': True}
 
@@ -1491,7 +1496,7 @@ Content-Length: %d
 
     @classmethod
     def Main(cls, args):
-        """Usage: rpckitten <command> [--json|--raw] [<args ...>]
+        """Usage: rpckitten [--json|--raw|--tcp] <command> [<args ...>]
 
     Commands:
 
@@ -1506,7 +1511,7 @@ Content-Length: %d
 
     You can also treat any API method as a command and invoke it from
     the command line. Add --json or --raw to alter whether/how the
-    output gets formatted.
+    output gets formatted. Pass --tcp to avoid the Unix domain socket.
 
     Examples:
         rpckitten ping --json
@@ -1519,14 +1524,18 @@ Content-Length: %d
             sys.exit(1)
 
         async def async_main(config, args):
-            def _extract_bool_arg(args, arg):
-                val = (arg in args)
-                if val:
-                    args.remove(arg)
-                return val
+            def _extract_bool_arg(args, *matches):
+                for i, a in enumerate(args):
+                    if not a.startswith('-'):
+                        break
+                    if a in matches:
+                        args.remove(a)
+                        return True
+                return False
 
-            print_json = _extract_bool_arg(args, '--json')
-            print_raw = _extract_bool_arg(args, '--raw')
+            print_json = _extract_bool_arg(args, '-j', '--json')
+            print_raw = _extract_bool_arg(args, '-r', '--raw')
+            no_unix = _extract_bool_arg(args, '-t', '--tcp')
 
             self = cls(config=config)
             name = '%s/%s' % (config.app_name, self.name)
@@ -1541,6 +1550,8 @@ Content-Length: %d
 
                 args, kwargs = self.extract_kwargs(args,
                     allowed=self._command_kwargs(command))
+                if no_unix:
+                    kwargs[self.CALL_ALLOW_UNIX] = False
 
                 if command == 'help':
                     _, result = await self.api_help(None, *args, **kwargs)
