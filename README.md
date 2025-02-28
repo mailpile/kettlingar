@@ -282,7 +282,7 @@ $ python3 -m examples.kitten start --worker-config=examples/kitten.cfg
 ...
 
 ## View the current configuration as JSON
-$ python3 -m examples.kitten config --json
+$ python3 -m examples.kitten --json config
 ...
 ```
 
