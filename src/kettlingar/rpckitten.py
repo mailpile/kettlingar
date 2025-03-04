@@ -8,7 +8,6 @@ import os
 import socket
 import sys
 import time
-import traceback
 import urllib.parse
 
 try:
@@ -26,11 +25,8 @@ try:
 except ImportError:
     signal = None
 
-from multiprocessing import Process
-from base64 import b64encode
-
 from .asynctools import create_background_task, FileWriter
-from .str_utils import str_addr, str_args
+from .str_utils import str_args
 
 
 def _mkdirp(path, mode):
@@ -317,7 +313,8 @@ class RPCKitten:
         self._convenience_methods = set()
 
     def _command_fullargspec(self, command):
-        for prefix in ('public_api_', 'public_raw_', 'api_', 'raw_'):
+        # This order matters, it should match _handle_http_request rules
+        for prefix in ('raw_', 'api_', 'public_raw_', 'public_api_'):
             try:
                 return inspect.getfullargspec(getattr(self, prefix+command))
             except AttributeError:
@@ -334,17 +331,28 @@ class RPCKitten:
             pass
         return []
 
+    def _fnames_and_api_funcs(self):
+        for api_fname in dir(self):
+            # This order matters, it should match _handle_http_request rules
+            for prefix in ('raw_', 'api_', 'public_raw_', 'public_api_'):
+                if api_fname.startswith(prefix):
+                    api_func = getattr(self, api_fname)
+                    fname = api_fname[len(prefix):]
+                    if ((not hasattr(self, fname))
+                            or (fname in self._convenience_methods)):
+                        yield fname, api_func
+                        break
+
     def _all_commands(self):
         found = {}
-        for key in dir(self):
-             for prefix in ('public_api_', 'public_raw_', 'api_', 'raw_'):
-                 if key.startswith(prefix):
-                     try:
-                         func = getattr(self, key)
-                         name = key[len(prefix):]
-                         found[name] = (func, inspect.getfullargspec(func))
-                     except TypeError:
-                         pass
+        for fname, api_func in self._fnames_and_api_funcs():
+            try:
+                found[fname] = {
+                    'api_method': api_func,
+                    'fullargspec': inspect.getfullargspec(api_func),
+                    'is_generator': inspect.isasyncgenfunction(api_func)}
+            except TypeError:
+                pass
         return found
 
     def __str__(self):
@@ -357,8 +365,8 @@ class RPCKitten:
     api_secret = property(lambda s: s._secret)
 
     def _local_convenience_methods(self):
-        def _mk_func(fname, api_method):
-            if inspect.isasyncgenfunction(api_method):
+        def _mk_func(fname, api_method=None, is_generator=False, **kwa):
+            if is_generator:
                 async def _func(*args, **kwargs):
                     async for result in api_method(None, *args, **kwargs):
                         yield result[1]
@@ -373,9 +381,9 @@ class RPCKitten:
             return _func
         self._make_convenience_methods(_mk_func)
 
-    def _remote_convenience_methods(self):
-        def _mk_func(fname, api_method):
-            if inspect.isasyncgenfunction(api_method):
+    def _remote_convenience_methods(self, extra_methods=None):
+        def _mk_func(fname, api_method=None, is_generator=False, **kwa):
+            if is_generator:
                 async def _func(*args, **kwargs):
                     _generator = await self.call(fname, *args, **kwargs)
                     if isinstance(_generator, dict):
@@ -388,17 +396,15 @@ class RPCKitten:
                 async def _func(*args, **kwargs):
                     return await self.call(fname, *args, **kwargs)
             return _func
-        self._make_convenience_methods(_mk_func)
+        self._make_convenience_methods(_mk_func, extra_methods=extra_methods)
 
-    def _make_convenience_methods(self, mk_func):
-        for api_fname in dir(self):
-            for prefix in ('public_api_', 'public_raw_', 'api_', 'raw_'):
-                if api_fname.startswith(prefix):
-                    api_func = getattr(self, api_fname)
-                    fname = api_fname[len(prefix):]
-                    if (not hasattr(self, fname)) or fname in self._convenience_methods:
-                        self._convenience_methods.add(fname)
-                        setattr(self, fname, mk_func(fname, api_func))
+    def _make_convenience_methods(self, mk_func, extra_methods=None):
+        method_info = self._all_commands()
+        if extra_methods:
+            method_info.update(extra_methods)
+        for fname, finfo in method_info.items():
+            self._convenience_methods.add(fname)
+            setattr(self, fname, mk_func(fname, **finfo))
 
     async def loopback(self):
         """
@@ -413,7 +419,6 @@ class RPCKitten:
         Establish a connection with the running service, optionally
         launching the service if it isn't yet running.
         """
-        self._remote_convenience_methods()
         self._init_logging()
 
         for tried in range(0, retry + 1):
@@ -421,13 +426,17 @@ class RPCKitten:
                 with open(self._urlfile, 'r') as fd:
                     self._url = fd.read().strip()
 
-                if await self.ping():
+                pong = await self.call('ping')
+                if pong:
+                    methods = pong.get('methods')
+                    self._remote_convenience_methods(extra_methods=methods)
                     return self
 
             except (OSError, RuntimeError) as e:
                 pass
 
             if auto_start:
+                from multiprocessing import Process
                 auto_start = False
                 if self._process:
                     self._process.join()
@@ -689,6 +698,7 @@ class RPCKitten:
                 self.to_json({'error': str(e)}))
             self.exception('Error serving %s: %s', method, e)
         except Exception as e:
+            import traceback
             req.code = 500
             sent = _w(
                 self._HTTP_RESPONSE[req.code],
@@ -846,6 +856,7 @@ class RPCKitten:
 
             return writer, 200, _b(mimetype), resp
         except Exception as e:
+            import traceback
             if authed:
                 return writer, 500, _b(mt), enc({
                     'error': str(e),
@@ -892,6 +903,7 @@ class RPCKitten:
     def _make_url(self, host_port):
         self._secret = self.config.worker_secret
         if not self._secret:
+            from base64 import b64encode
             secret = str(b64encode(os.urandom(18), b'-_').strip(), 'utf-8')
             self._secret = secret
         if self.config.worker_url_path:
@@ -1193,6 +1205,7 @@ Content-Length: %d
                 if not body:
                     result = {'error': 'Empty response body'}
                 else:
+                    import traceback
                     result = {
                         'error': 'Failed to unpack %s: %s' % (body, e),
                         'traceback': traceback.format_exc()}
@@ -1290,6 +1303,7 @@ Content-Length: %d
             try:
                 return await raw_method(request_obj, *args, **kwargs)
             except Exception as e:
+                import traceback
                 err = {'error': str(e)}
                 if request_obj.authed:
                     err['traceback'] = traceback.format_exc()
@@ -1358,6 +1372,7 @@ Content-Length: %d
             except (IOError, BrokenPipeError) as exc:
                 self.debug('Broken pipe: %s' % exc)
             except Exception as e:
+                import traceback
                 data = {'error': str(e)}
                 if request_obj.authed:
                     data['traceback'] = traceback.format_exc()
@@ -1402,8 +1417,18 @@ Content-Length: %d
             if not isinstance(body, dict):
                 body = {}
 
+            all_commands = self._all_commands()
+            for k, i in all_commands.items():
+                try:
+                    i['help'] = i['api_method'].__doc__.rstrip()
+                except AttributeError:
+                    pass
+                del i['api_method']
+                del i['fullargspec']
+
             body['pong'] = True
             body['conn'] = ':'.join(str(v) for v in request_obj.peer)
+            body['methods'] = all_commands
             body['_format'] = 'Pong via %(conn)s!'
 
             request_obj.write(
@@ -1457,10 +1482,9 @@ Content-Length: %d
         if not command:
             main_doc = doc(self.Main).replace('rpckitten', self.config.app_name)
 
-            commands = self._all_commands()
             cmd_list = ['API Commands: ']
             first = True
-            for command in sorted(list(commands.keys())):
+            for command in sorted(list(self._all_commands().keys())):
                 if command in ('ping', 'help', 'config', 'quitquitquit'):
                     continue
                 if len(cmd_list[-1]) + len(command) > 75:
@@ -1680,6 +1704,7 @@ Content-Length: %d
             args = config.configure(list(args), strict=False)
             task = async_main(config, args)
         except:
+            import traceback
             traceback.print_exc()
 
         asyncio.run(task)

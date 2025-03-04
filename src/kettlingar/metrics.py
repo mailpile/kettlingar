@@ -1,5 +1,6 @@
 import random
 
+
 class RPCKittenVarz:
     """
     Work in progress - This class will be a mix-in for RPC Kittens
