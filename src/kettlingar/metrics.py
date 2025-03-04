@@ -71,6 +71,9 @@ class RPCKittenVarz:
         """
         sent = sent or request_info.sent
         for prefix in ('http', request_info.handler):
+            if not prefix:
+                break
+
             self.metrics_count(prefix + '_%d' % request_info.code,
                 public=(prefix == 'http'))
 
