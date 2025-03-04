@@ -867,8 +867,15 @@ class RPCKitten:
     async def init_servers(self, servers):
         """
         Subclasses can override this with initialization logic.
+
         This function should return the (potentially modified) list of
         server instances.
+
+        Note: that one of the things that can happen here, is to add
+        `api_*` methods to the class. They will be exposed for remote
+        invocation and advertised during .connect()/.ping().  This
+        allows for lazy-loading bulky code, keeping the client slim
+        and fast.
         """
         return servers
 
@@ -1408,7 +1415,8 @@ Content-Length: %d
     async def public_raw_ping(self, request_obj, **kwa):
         """/ping
 
-        Check whether the microservice is running.
+        Check whether the microservice is running (public) and which
+        services it currently offers (requires authentication).
         """
         if request_obj.authed:
             mt = request_obj.mimetype
@@ -1429,7 +1437,8 @@ Content-Length: %d
             body['pong'] = True
             body['conn'] = ':'.join(str(v) for v in request_obj.peer)
             body['methods'] = all_commands
-            body['_format'] = 'Pong via %(conn)s!'
+            body['_format'] = (
+                'Pong via %(conn)s! (see JSON for full method list)')
 
             request_obj.write(
                 self._HTTP_200_OK % bytes(mt, 'utf-8'),
