@@ -67,6 +67,7 @@ class RequestInfo:
         self.sent = 0
         self.code = 500  # Failing to update this is an error
         self.handler = None
+        self.is_generator = False
 
     socket = property(lambda s: s.writer._transport._sock)
     fileno = property(lambda s: s.writer._transport._sock.fileno())
@@ -842,6 +843,7 @@ class RPCKitten:
 
         if inspect.isasyncgenfunction(api_method):
             raw_method = self._wrap_async_generator(api_method)
+            request_obj.is_generator = True
 
         if raw_method is not None:
             _wrapped = self._wrap_drain_and_close(raw_method)
@@ -1413,10 +1415,11 @@ Content-Length: %d
         raise RuntimeError('FIXME: Not implemented')
 
     async def public_raw_ping(self, request_obj, **kwa):
-        """/ping
+        """/ping [--docs=y]
 
         Check whether the microservice is running (public) and which
-        services it currently offers (requires authentication).
+        services it currently offers (requires authentication). Send
+        `--docs=y` to include method docstrings.
         """
         if request_obj.authed:
             mt = request_obj.mimetype
@@ -1427,10 +1430,11 @@ Content-Length: %d
 
             all_commands = self._all_commands()
             for k, i in all_commands.items():
-                try:
-                    i['help'] = i['api_method'].__doc__.rstrip()
-                except AttributeError:
-                    pass
+                if kwa.get('docs'):
+                    try:
+                        i['help'] = i['api_method'].__doc__.rstrip()
+                    except AttributeError:
+                        pass
                 del i['api_method']
                 del i['fullargspec']
 

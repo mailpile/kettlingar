@@ -70,22 +70,24 @@ class RPCKittenVarz:
         Record metrics for an HTTP request.
         """
         sent = sent or request_info.sent
-        for prefix in ('http', request_info.handler):
-            if not prefix:
-                break
 
-            self.metrics_count(prefix + '_%d' % request_info.code,
-                public=(prefix == 'http'))
+        for pfx in ('http', request_info.handler):
+            if not pfx:
+                break
+            pub = (pfx == 'http')
+
+            self.metrics_count(pfx + '_%d' % request_info.code, public=pub)
 
             via = '_unix' if request_info.via_unix_domain else '_tcp'
-            self.metrics_count(prefix + via, public=False)
+            self.metrics_count(pfx + via, public=False)
+
+            if request_info.is_generator and (pfx == 'http'):
+                pfx = 'http_gen'
 
             if sent:
-                self.metrics_count(prefix + '_sent_bytes', sent,
-                    public=(prefix == 'http'))
+                self.metrics_count(pfx + '_sent_bytes', sent, public=pub)
             if elapsed_us:
-                self.metrics_sample(prefix + '_elapsed_us', elapsed_us,
-                    public=(prefix == 'http'))
+                self.metrics_sample(pfx + '_elapsed_us', elapsed_us, public=pub)
 
     async def public_api_varz(self, request_info):
         """/varz
