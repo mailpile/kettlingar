@@ -65,8 +65,7 @@ class HtmxKitten(MyKitten):
         This implementation leaks our secret and is horribly insecure as a
         result. Don't do this!
         """
-        return 'text/html', SINGLE_PAGE_APP % {
-            'secret': self.config.worker_secret}
+        return 'text/html', SINGLE_PAGE_APP % {'secret': self.api_secret}
 
     async def api_events(self, request_info, count=10):
         """/events

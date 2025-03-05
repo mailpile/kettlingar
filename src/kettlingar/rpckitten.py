@@ -659,7 +659,7 @@ class RPCKitten:
                 req.authed = True
             except PermissionError:
                 req.authed = False
-            req.path = path
+            req.path = path or '/'
 
             (writer, req.code, mimetype, response
                 ) = await self._handle_http_request(req)
