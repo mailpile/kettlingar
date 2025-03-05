@@ -72,6 +72,14 @@ class MyKitten(RPCKitten, RPCKittenVarz):
         """
         return (self.public_api_meow, None)
 
+    async def init_servers(self, servers):
+        """Initialize servers
+
+        Dynamically create a `mrow` method during initialization.
+        """
+        self.api_mrow = self.api_both
+        return servers
+
 
 if __name__ == '__main__':
     import sys

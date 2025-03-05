@@ -1647,10 +1647,6 @@ Content-Length: %d
                 if no_msgpack:
                     kwargs[self.CALL_USE_JSON] = True
 
-                if command == 'help':
-                    _, result = await self.api_help(None, *args, **kwargs)
-                    return _print_result(result)
-
                 if command == 'start':
                     await self.connect(auto_start=True)
                     if self._url:
@@ -1677,7 +1673,14 @@ Content-Length: %d
                     await async_main(config, ['start'])
                     return
 
-                await self.connect()
+                try:
+                    await self.connect()
+                except cls.NotRunning:
+                    if command == 'help':
+                        _, result = await self.api_help(None, *args, **kwargs)
+                        return _print_result(result)
+                    raise
+
                 result = await self.call(command, *args, **kwargs)
                 if inspect.isasyncgenfunction(result):
                     async for res in result():
