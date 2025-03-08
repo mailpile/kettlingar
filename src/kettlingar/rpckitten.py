@@ -427,7 +427,7 @@ class RPCKitten:
                 with open(self._urlfile, 'r') as fd:
                     self._url = fd.read().strip()
 
-                pong = await self.call('ping')
+                pong = await self.call('ping', call_max_tries=0)
                 if pong:
                     methods = pong.get('methods')
                     self._remote_convenience_methods(extra_methods=methods)
@@ -536,6 +536,7 @@ class RPCKitten:
         self.is_service = True
 
     def _process_run(self):
+        asyncio.set_event_loop_policy(None)
         try:
             self._setup_service()
             if signal is not None:
@@ -1404,8 +1405,8 @@ Content-Length: %d
 
         return raw_method
 
-    async def public_raw_websocket(self, request_obj):
-        """/websocket
+    async def public_raw_ws(self, request_obj):
+        """/ws
 
         Create a persistent websocket connection.
         """
@@ -1498,7 +1499,7 @@ Content-Length: %d
             cmd_list = ['API Commands: ']
             first = True
             for command in sorted(list(self._all_commands().keys())):
-                if command in ('ping', 'help', 'config', 'quitquitquit'):
+                if command in ('ping', 'help', 'config', 'quitquitquit', 'ws'):
                     continue
                 if len(cmd_list[-1]) + len(command) > 75:
                     cmd_list.append('   ')
@@ -1723,5 +1724,6 @@ Content-Length: %d
             import traceback
             traceback.print_exc()
 
+        asyncio.set_event_loop_policy(None)
         asyncio.run(task)
 
