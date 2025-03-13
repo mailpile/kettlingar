@@ -1490,17 +1490,17 @@ Content-Length: %d
         """
         results = {}
 
-        def call_config_hook(key):
+        async def call_config_hook(key):
             hookname = 'on_config_%s' % key
             if hasattr(self, hookname):
-                return getattr(self, hookname)()
+                return await getattr(self, hookname)()
             else:
                 return key
 
         if reset:
             default = getattr(self.config, reset.upper())
             setattr(self.config, reset.lower(), default)
-            results['reset'] = call_config_hook(reset)
+            results['reset'] = await call_config_hook(reset)
 
         if 1 < sum([(1 if a else 0) for a in (val, append, remove, pop)]):
             raise ValueError('Please only perform one operation at a time!')
@@ -1511,18 +1511,18 @@ Content-Length: %d
                 self.config.configure(
                     args=['--%s=%s' % (key, val)],
                     set_defaults=False)
-                results['val'] = call_config_hook(key)
+                results['val'] = await call_config_hook(key)
             elif append:
                 getattr(self.config, key.lower()).append(append)
-                results['append'] = call_config_hook(key)
+                results['append'] = await call_config_hook(key)
             elif remove:
                 getattr(self.config, key.lower()).remove(remove)
-                results['remove'] = call_config_hook(key)
+                results['remove'] = await call_config_hook(key)
             elif pop:
                 getattr(self.config, key.lower()).pop(int(pop))
-                results['pop'] = call_config_hook(key)
+                results['pop'] = await call_config_hook(key)
 
-        if save and call_config_hook(save):
+        if save and await call_config_hook(save):
             if self.Bool(save):
                 filepath = self.config._default_config_file()
             else:
