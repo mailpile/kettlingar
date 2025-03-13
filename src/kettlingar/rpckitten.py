@@ -200,6 +200,9 @@ class RPCKitten:
                         results[akey] = getattr(self, akey, None)
             return results
 
+        def _default_config_file(self):
+             return os.path.join(self.app_data_dir, self.worker_name + '.cfg')
+
         def _set_defaults(self):
             for akey in self.__dict__:
                 if akey[:1] != '_' and getattr(self, akey, None) is None:
@@ -271,8 +274,12 @@ class RPCKitten:
                                 raise ValueError('Not a dict: %s' % val)
                         setattr(self, key, val)
                         consumed.add(arg)
-                        if key == 'worker_config':
-                            self._configure_from_file(val)
+                        if key == 'worker_config' and val:
+                            if RPCKitten.Bool(val):
+                                self._configure_from_file(
+                                    self._default_config_file())
+                            else:
+                                self._configure_from_file(val)
 
             unconsumed = [a for a in args if a not in consumed]
             if unconsumed and strict:
@@ -280,6 +287,12 @@ class RPCKitten:
 
             if set_defaults:
                 self._set_defaults()
+
+            if not consumed:
+                try:
+                    self._configure_from_file(self._default_config_file())
+                except OSError:
+                    pass
 
             return unconsumed
 
@@ -1452,14 +1465,76 @@ Content-Length: %d
             # Not authed: do less work and don't let caller influence output
             request_obj.write(self._HTTP_200_STATIC_PONG)
 
-    async def api_config(self, request_obj):
-        """/config
+    async def api_config(self, request_obj,
+            reset=None,
+            key=None,
+            val=None,
+            append=None,
+            remove=None,
+            pop=None,
+            save=None):
+        """/config [<options ...>]
 
-        Returns the current configuration.
+        Returns the current configuration, optionally after editing it.
+
+        Options:
+            --reset=<K>   Reset K to default values
+            --key=<K>     Key to manipulate (requries one of the below)
+            --val=<V>     Set K=V
+            --append=<V>  Append string V to K (must be a list)
+            --remove=<V>  Remove string V from K (must be a list)
+            --pop=<N>     Pop item at offset N from K (must be a list)
+            --save=<P>    Save the configuration to path P. If P is one of
+                          the recognized boolean strings (t, true, y, yes),
+                          save to the default location.
         """
-        return None, {
+        results = {}
+
+        def call_config_hook(key):
+            hookname = 'on_config_%s' % key
+            if hasattr(self, hookname):
+                return getattr(self, hookname)()
+            else:
+                return key
+
+        if reset:
+            default = getattr(self.config, reset.upper())
+            setattr(self.config, reset.lower(), default)
+            results['reset'] = call_config_hook(reset)
+
+        if 1 < sum([(1 if a else 0) for a in (val, append, remove, pop)]):
+            raise ValueError('Please only perform one operation at a time!')
+
+        if key:
+            default = getattr(self.config, key.upper())  # Raises if key is bogus
+            if val:
+                self.config.configure(
+                    args=['--%s=%s' % (key, val)],
+                    set_defaults=False)
+                results['val'] = call_config_hook(key)
+            elif append:
+                getattr(self.config, key.lower()).append(append)
+                results['append'] = call_config_hook(key)
+            elif remove:
+                getattr(self.config, key.lower()).remove(remove)
+                results['remove'] = call_config_hook(key)
+            elif pop:
+                getattr(self.config, key.lower()).pop(int(pop))
+                results['pop'] = call_config_hook(key)
+
+        if save and call_config_hook(save):
+            if self.Bool(save):
+                filepath = self.config._default_config_file()
+            else:
+                filepath = save
+            with open(filepath, 'w') as fd:
+                fd.write(str(self.config))
+
+        results.update({
             'config': self.config.as_dict(),
-            '_format': str(self.config).replace('%', '%%')}
+            '_format': str(self.config).replace('%', '%%')})
+
+        return None, results
 
     async def api_quitquitquit(self, request_obj):
         """/quitquitquit
