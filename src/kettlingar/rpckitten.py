@@ -503,42 +503,51 @@ class RPCKitten:
             stderrLog.setFormatter(logging.Formatter(fmt))
             rootLogger.addHandler(stderrLog)
 
+    def logger(self, level, fmt, *args):
+        """
+        Convenience function for logging.
+        """
+        msg = (fmt % args) if args else fmt
+        logging.log(level, '[%s] %s', self.name, msg)
+        return msg
+
     def exception(self, fmt, *args):
         """
         Convenience function for logging exceptions.
         """
-        logging.exception(
-            '[%s] %s', self.name, (fmt % args) if args else fmt)
+        import traceback
+        self.error(fmt, *args)
+        self.debug('%s', traceback.format_exc())
 
     def error(self, fmt, *args):
         """
         Convenience function for logging errors.
         """
-        logging.log(40, '[%s] %s', self.name, (fmt % args) if args else fmt)
+        return self.logger(40, fmt, *args)
 
     def warning(self, fmt, *args):
         """
         Convenience function for logging warnings.
         """
-        logging.log(30, '[%s] %s', self.name, (fmt % args) if args else fmt)
+        return self.logger(30, fmt, *args)
 
     def info(self, fmt, *args):
         """
         Convenience function for logging app information.
         """
-        logging.log(20, '[%s] %s', self.name, (fmt % args) if args else fmt)
+        return self.logger(20, fmt, *args)
 
     def debug(self, fmt, *args):
         """
         Convenience function for logging debug information.
         """
-        logging.log(10, '[%s] %s', self.name, (fmt % args) if args else fmt)
+        return self.logger(10, fmt, *args)
 
     def trace(self, fmt, *args):
         """
         Convenience function for logging traces (very detailed debug logs).
         """
-        logging.log(1, '[%s] %s', self.name, (fmt % args) if args else fmt)
+        return self.logger(1, fmt, *args)
 
     def _setup_service(self):
         logging.getLogger().setLevel(self.config.worker_log_level)
@@ -1768,6 +1777,9 @@ Content-Length: %d
                     return
                 else:
                     return _print_result(result)
+
+            except KeyboardInterrupt:
+                pass
 
             except cls.NotRunning:
                 sys.stderr.write(
