@@ -58,7 +58,7 @@ class RequestInfo:
         self.reader = reader
         self.writer = writer
         self.mimetype = mimetype
-        self.encoder = encoder
+        self.encoder = encoder or (lambda d: d)
         self.method = method
         self.headers = headers
         self.path = path
@@ -1382,6 +1382,8 @@ Content-Length: %d
                         resp_mimetype = mimetype
                         if mimetype == 'text/event-stream':
                             events = enc = self.to_server_sent_event
+                        else:
+                            enc = lambda d: d  # Should already be encoded!
 
                     if first:
                         if not mimetype and isinstance(resp, dict):
