@@ -131,6 +131,7 @@ class RPCKitten:
     _HTTP_RESPONSE_UNKNOWN = b'HTTP/1.1 %d Unknown\n'
     _HTTP_RESPONSE = {
         200: b'HTTP/1.1 200 OK\n',
+        302: b'HTTP/1.1 302 Moved Permanently\n',
         400: b'HTTP/1.1 400 Invalid Request\n',
         403: b'HTTP/1.1 403 Access Denied\n',
         404: b'HTTP/1.1 404 Not Found\n',
@@ -146,6 +147,10 @@ class RPCKitten:
     _HTTP_SORRY = (b'Content-Type: application/json\n'
                   b'Connection: close\n\n'
                   b'{"error": "Sorry"}\n')
+    _HTTP_MOVED = (b'Content-Type: application/json\n'
+                  b'Connection: close\n'
+                  b'Location: %s\n\n'
+                  b'{"redirect": %s}\n')
 
     class NotRunning(OSError):
         pass
@@ -295,6 +300,11 @@ class RPCKitten:
                     pass
 
             return unconsumed
+
+    class RedirectException(Exception):
+        def __init__(self, t, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.target = bytes(t, 'utf-8') if isinstance(t, str) else t
 
     def __init__(self, **kwargs):
         args = kwargs.pop('args', None)
@@ -708,6 +718,11 @@ class RPCKitten:
                     (self._HTTP_RESPONSE_UNKNOWN % req.code))
                 sent = _w(l1, (self._HTTP_MIMETYPE % mimetype), response)
 
+        except RPCKitten.RedirectException as e:
+            req.code = 302
+            sent = _w(
+                self._HTTP_RESPONSE[req.code],
+                self._HTTP_MOVED % (e.target, e.target))
         except PermissionError:
             req.code = 403
             sent = _w(self._HTTP_RESPONSE[req.code], self._HTTP_SORRY)
@@ -880,6 +895,8 @@ class RPCKitten:
                 resp = request_obj.encoder(resp)
 
             return writer, 200, _b(mimetype), resp
+        except RPCKitten.RedirectException:
+            raise
         except Exception as e:
             import traceback
             if authed:
