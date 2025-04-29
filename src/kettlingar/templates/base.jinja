@@ -1,0 +1,19 @@
+{% if not partial %}
+<!doctype html>
+<html><head>
+  <meta name="color-scheme" content="light dark" />
+
+  <title>
+    {%- block title %}{% endblock -%}
+  </title>
+
+  {% block head %}{% endblock %}
+
+</head><body>
+{% endif %}
+
+  {%- block content %}{% endblock -%}
+
+{% if not partial %}
+</body></html>
+{% endif %}
