@@ -12,3 +12,4 @@ from .rpckitten import RPCKitten
 from .__version__ import __version__
 
 __all__ = ['RPCKitten']
+

@@ -135,6 +135,7 @@ class RPCKitten:
         400: b'HTTP/1.1 400 Invalid Request\n',
         403: b'HTTP/1.1 403 Access Denied\n',
         404: b'HTTP/1.1 404 Not Found\n',
+        423: b'HTTP/1.1 423 Locked\n',
         500: b'HTTP/1.1 500 Internal Error\n'}
 
     _HTTP_MIMETYPE = (b'Content-Type: %s\n'
@@ -300,6 +301,20 @@ class RPCKitten:
                     pass
 
             return unconsumed
+
+    class NeedInfoException(Exception):
+        class Var(dict):
+            def __init__(self, varname, vartype, default=None, comment=None):
+                super().__init__()
+                self['name'] = varname
+                self['type'] = vartype
+                self['default'] = default
+                self['comment'] = comment
+
+        def __init__(self, comment, needed_vars=None):
+            super().__init__(comment)
+            self.needed_vars = needed_vars or []
+            self.http_code = 423
 
     class RedirectException(Exception):
         def __init__(self, t, *args, **kwargs):
@@ -723,6 +738,12 @@ class RPCKitten:
             sent = _w(
                 self._HTTP_RESPONSE[req.code],
                 self._HTTP_MOVED % (e.target, e.target))
+        except RPCKitten.NeedInfoException as e:
+            req.code = e.http_code
+            sent = _w(
+                self._HTTP_RESPONSE[req.code],
+                self._HTTP_JSON,
+                self.to_json({'error': str(e), 'needed_vars': e.needed_vars}))
         except PermissionError:
             req.code = 403
             sent = _w(self._HTTP_RESPONSE[req.code], self._HTTP_SORRY)
@@ -896,6 +917,8 @@ class RPCKitten:
 
             return writer, 200, _b(mimetype), resp
         except RPCKitten.RedirectException:
+            raise
+        except RPCKitten.NeedInfoException:
             raise
         except Exception as e:
             import traceback
@@ -1141,13 +1164,18 @@ class RPCKitten:
                 return os.fdopen(fds.pop(0), mode=mode)
         return a
 
-    def _get_exception(self, resp_code):
+    def _get_exception(self, resp_code, result):
         exc = RuntimeError
         try:
             resp_code = int(resp_code)
         except:
             pass
-        if resp_code in (401, 403, 407):
+        if (resp_code == 423) or ('needed_vars' in result):
+            needed_vars = [self.NeedInfoException.Var(
+                     v['name'], v['type'], v.get('default'), v.get('comment')
+                ) for v in result['needed_vars']]
+            return self.NeedInfoException(result['error'], needed_vars)
+        elif resp_code in (401, 403, 407):
             exc = PermissionError
         elif resp_code in (404, ):
             exc = KeyError
@@ -1155,7 +1183,7 @@ class RPCKitten:
             exc = IOError
         elif 400 <= resp_code < 500:
             exc = ValueError
-        return exc
+        return exc('HTTP %d: %s' % (resp_code, result.get('error')))
 
     async def call(self, fn, *args, **kwargs):
         """
@@ -1266,10 +1294,10 @@ Content-Length: %d
                     return result
                 resp_code = 500
 
-            exc = self._get_exception(resp_code)
+            exc = self._get_exception(resp_code, result)
             if 'traceback' in result:
                 self.error('Remote %s', result['traceback'])
-            raise exc('HTTP %d: %s' % (resp_code, result.get('error')))
+            raise exc
         finally:
             rtime = 1000 * (time.time() - t0)
             (self.debug if (200 <= resp_code < 300) else self.error)(
@@ -1423,12 +1451,18 @@ Content-Length: %d
             except (IOError, BrokenPipeError) as exc:
                 self.debug('Broken pipe: %s' % exc)
             except Exception as e:
-                import traceback
                 data = {'error': str(e)}
-                if request_obj.authed:
+
+                if hasattr(e, 'needed_vars'):
+                    # NeedInfoException
+                    data['needed_vars'] = e.needed_vars
+                elif request_obj.authed:
+                    import traceback
                     data['traceback'] = traceback.format_exc()
+
                 if events:
                     data = {'event': 'error', 'data': data}
+
                 if first:
                     try:
                         http_resp = self._HTTP_RESPONSE[int(e.http_code)]
@@ -1694,6 +1728,20 @@ Content-Length: %d
             print(self.TextFormat(result) % result)
 
     @classmethod
+    def _cli_collect_needed_info(cls, message, needed_vars, kwargs):
+        import sys, getpass
+        print(message)
+        for nv in needed_vars:
+            vname = nv['name']
+            vtype = (nv.get('type') or 'info').lower()
+            if vtype[:4] == 'pass':
+                kwargs[vname] = getpass.getpass((nv.get('comment') or 'Password') + ': ')
+            elif vtype[:4] == 'user':
+                kwargs[vname] = input((nv.get('comment') or 'Username') + ': ')
+            else:
+                kwargs[vname] = input((nv.get('comment') or vname) + ': ')
+
+    @classmethod
     def Main(cls, args):
         """Usage: rpckitten [--json|--raw|--tcp] <command> [<args ...>]
 
@@ -1789,13 +1837,17 @@ Content-Length: %d
                         return _print_result(result)
                     raise
 
-                result = await self.call(command, *args, **kwargs)
-                if inspect.isasyncgenfunction(result):
-                    async for res in result():
-                        _print_result(res)
-                    return
-                else:
-                    return _print_result(result)
+                for tries in (1, 2, 3):
+                    try:
+                        result = await self.call(command, *args, **kwargs)
+                        if inspect.isasyncgenfunction(result):
+                            async for res in result():
+                                _print_result(res)
+                            return
+                        else:
+                            return _print_result(result)
+                    except cls.NeedInfoException as e:
+                        cls._cli_collect_needed_info(str(e), e.needed_vars, kwargs)
 
             except KeyboardInterrupt:
                 pass
