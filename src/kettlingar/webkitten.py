@@ -1,4 +1,5 @@
 import datetime
+import inspect
 import os
 
 
@@ -92,7 +93,13 @@ class WebKitten:
                 'title': title,
                 'partial': 'htmx=1' in qs,
                 'url': self.api_url + self.prefix})
-            variables.update((await func(req, *args))[1])
+
+            if inspect.isasyncgenfunction(func):
+                variables['results'] = results = []
+                async for mimetype, result in func(req, *args):
+                    results.append(result)
+            else:
+                variables.update((await func(req, *args))[1])
 
             return 'text/html', await template.render_async(variables)
         except Exception as e:
