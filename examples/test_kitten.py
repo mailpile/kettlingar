@@ -4,6 +4,10 @@ import sys
 from .kitten import MyKitten
 
 
+async def call_slow_meow(kitty, which):
+    print("%s: %s" % (which, await kitty.slow_meow()))
+
+
 async def test_function():
     args = sys.argv[1:]
     loopback = '--loopback' in args
@@ -16,10 +20,16 @@ async def test_function():
     else:
         await kitty.connect(auto_start=True)
 
-    print('%s' % kitty)
     print('Pinged: %s' % await kitty.ping())
     print('Our first meow: %s' % (await kitty.meow()))
 
+    # Send overlapping requests (demonstrate things do not block)
+    m1 = asyncio.create_task(call_slow_meow(kitty, "Meow 1"))
+    m2 = asyncio.create_task(call_slow_meow(kitty, "Meow 2"))
+    m3 = asyncio.create_task(call_slow_meow(kitty, "Meow 3"))
+    await asyncio.gather(m1, m2, m3)
+
+    # This is what incremental results look like!
     async for result in kitty.purr(10):
         print(result['purr'])
 

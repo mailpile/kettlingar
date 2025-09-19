@@ -1,4 +1,5 @@
 import asyncio
+import random
 
 from kettlingar import RPCKitten
 from kettlingar.metrics import RPCKittenVarz
@@ -33,6 +34,15 @@ class MyKitten(RPCKitten, RPCKittenVarz):
         return (
             'text/plain',           # Fixed MIME type of `text/plain`
             'Meow world, meow!\n')  # Meow!
+
+    async def public_api_slow_meow(self, request_info):
+        """/slow_meow
+
+        Same as above, but with a random delay before responding.
+        """
+        delay = random.randint(0, 75) / 100.0
+        await asyncio.sleep(delay)
+        return ('text/plain', 'Meow world, meow after %.2fs!\n' % delay)
 
     async def api_purr(self, request_info, count=1, purr='purr'):
         """/purr [--count=<N>] [--purr=<sound>]
