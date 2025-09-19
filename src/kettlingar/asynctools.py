@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import socket
+import time
 import traceback
 
 
@@ -92,3 +93,24 @@ async def gather_and_close(done_cb, done_args, tasks, *conns):
         done_cb(*done_args)
     except Exception as e:
         done_cb(*done_args, exception=e)
+
+
+async def await_success(func, *args,
+        timeout=120,
+        sleeptime=0.01,
+        sleepstep=0.01,
+        sleepmax=0.5,
+        retried_exceptions=(IOError,)):
+    """
+    Repeatedly attempt an operation until it succeeds.
+    """
+    deadline = (time.time() + timeout) if timeout else None
+    while (not deadline) or (time.time() < deadline):
+        await asyncio.sleep(sleeptime)
+        sleeptime = min(sleepmax, sleeptime + sleepstep)
+        try:
+            return func(*args)
+        except retried_exceptions:
+            pass
+
+    raise IOError('Timed out: await_success(%s, %s)' % (func, args))

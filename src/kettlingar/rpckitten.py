@@ -25,8 +25,8 @@ try:
 except ImportError:
     signal = None
 
-from .asynctools import create_background_task, FileWriter
-from .str_utils import str_args
+from .asynctools import create_background_task, await_success, FileWriter
+from .str_utils import str_addr, str_args
 
 
 def _mkdirp(path, mode):
@@ -681,7 +681,8 @@ class RPCKitten:
         t0 = time.time()
         sent = 0
         fds_ok = False
-        method = path = version = ''
+        method = path = version = peer = sent = ''
+        code = 500
         try:
             head, hdrs, body, fds = await self._http11(reader, writer, fds=True)
             method, path, version = head.split(None, 3)[:3]
@@ -1121,9 +1122,15 @@ class RPCKitten:
         if fds and (sock.family == socket.AF_UNIX):
             try:
                 reader._transport.pause_reading()
-                sock.settimeout(2)
-                sock.setblocking(1)
-                data, ancdata, _, _ = sock.recvmsg(bufsize, bufsize // 8)
+
+                data, ancdata, _, _ = await await_success(
+                    sock.recvmsg, bufsize, bufsize // 8,
+                    sleeptime=0.005,  # Initial sleep, give other end time
+                    sleepstep=0.01,   # Slow down by this much on each try
+                    sleepmax=0.25,    # Max polling interval
+                    timeout=120,
+                    retried_exceptions=(BlockingIOError,))
+
                 fds = array.array('i')
                 for cmsg_lvl, cmsg_typ, cmsg_data in ancdata:
                     if (cmsg_lvl == socket.SOL_SOCKET
@@ -1135,8 +1142,6 @@ class RPCKitten:
                 self.exception(
                     '%s.recvmsg(%d) with FDs failed', sock, bufsize)
             finally:
-                sock.setblocking(0)
-                sock.settimeout(0)
                 reader._transport.resume_reading()
             return None, []
         else:
