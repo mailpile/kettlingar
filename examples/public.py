@@ -57,5 +57,4 @@ class PublicKitten(RPCKitten):
 
 
 if __name__ == '__main__':
-    import sys
-    PublicKitten.Main(sys.argv[1:])
+    PublicKitten.Main()

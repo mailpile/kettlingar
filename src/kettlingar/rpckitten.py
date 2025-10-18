@@ -1763,7 +1763,7 @@ Content-Length: %d
                 kwargs[vname] = input((nv.get('comment') or vname) + ': ')
 
     @classmethod
-    def Main(cls, args):
+    def Main(cls, args=False):
         """Usage: rpckitten [--json|--raw|--tcp] <command> [<args ...>]
 
     Commands:
@@ -1785,6 +1785,10 @@ Content-Length: %d
         rpckitten ping --json
         rpckitten help ping
         """
+        if args is False:
+            import sys
+            args = sys.argv[1:]
+
         if not args:
             print(cls.__doc__.strip().replace('\n    ', '\n'))
             print()

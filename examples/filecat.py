@@ -25,5 +25,4 @@ class FileCat(RPCKitten):
 
 
 if __name__ == '__main__':
-    import sys
-    FileCat.Main(sys.argv[1:])
+    FileCat.Main()

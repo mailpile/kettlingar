@@ -93,5 +93,4 @@ class HtmxKitten(MyKitten):
 
 
 if __name__ == '__main__':
-    import sys
-    HtmxKitten.Main(sys.argv[1:])
+    HtmxKitten.Main()

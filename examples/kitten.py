@@ -92,5 +92,4 @@ class MyKitten(RPCKitten, RPCKittenVarz):
 
 
 if __name__ == '__main__':
-    import sys
-    MyKitten.Main(sys.argv[1:])
+    MyKitten.Main()

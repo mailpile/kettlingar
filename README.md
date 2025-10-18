@@ -101,8 +101,7 @@ class MyKitten(RPCKitten):
 
 
 if __name__ == '__main__':
-    import sys
-    MyKitten.Main(sys.argv[1:])
+    MyKitten.Main()
 ```
 
 This (or something very similar) can be found in the
