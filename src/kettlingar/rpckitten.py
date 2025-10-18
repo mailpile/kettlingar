@@ -133,6 +133,7 @@ class RPCKitten:
         200: b'HTTP/1.1 200 OK\n',
         302: b'HTTP/1.1 302 Moved Permanently\n',
         400: b'HTTP/1.1 400 Invalid Request\n',
+        401: b'HTTP/1.1 401 Unauthorized\n',
         403: b'HTTP/1.1 403 Access Denied\n',
         404: b'HTTP/1.1 404 Not Found\n',
         423: b'HTTP/1.1 423 Locked\n',
@@ -248,10 +249,6 @@ class RPCKitten:
         def configure(self, args=None, strict=True, set_defaults=True):
             consumed = set()
 
-            def _kv(i):
-                k, v = i.strip().split(':')
-                return k.strip, v.strip()
-
             if not args:
                 args = []
             for arg in args:
@@ -303,18 +300,23 @@ class RPCKitten:
             return unconsumed
 
     class NeedInfoException(Exception):
+        http_code = 423
+
         class Var(dict):
-            def __init__(self, varname, vartype, default=None, comment=None):
+            def __init__(self, varname,
+                    vartype='text', default=None, comment=None):
                 super().__init__()
                 self['name'] = varname
                 self['type'] = vartype
                 self['default'] = default
                 self['comment'] = comment
 
-        def __init__(self, comment, needed_vars=None):
+        def __init__(self, comment, needed_vars=None, resource=None):
             super().__init__(comment)
-            self.needed_vars = needed_vars or []
-            self.http_code = 423
+            self.resource = resource or False
+            self.needed_vars = [self.Var(
+                    v['name'], v['type'], v.get('default'), v.get('comment')
+                ) for v in (needed_vars or [])]
 
     class RedirectException(Exception):
         def __init__(self, t, *args, **kwargs):
@@ -744,7 +746,10 @@ class RPCKitten:
             sent = _w(
                 self._HTTP_RESPONSE[req.code],
                 self._HTTP_JSON,
-                self.to_json({'error': str(e), 'needed_vars': e.needed_vars}))
+                self.to_json({
+                    'error': str(e),
+                    'resource': e.resource,
+                    'needed_vars': e.needed_vars}))
         except PermissionError:
             req.code = 403
             sent = _w(self._HTTP_RESPONSE[req.code], self._HTTP_SORRY)
@@ -1170,16 +1175,17 @@ class RPCKitten:
         return a
 
     def _get_exception(self, resp_code, result):
+        logging.debug('_get_exception(%s, %s)' % (resp_code, result))
         exc = RuntimeError
         try:
             resp_code = int(resp_code)
         except:
             pass
-        if (resp_code == 423) or ('needed_vars' in result):
-            needed_vars = [self.NeedInfoException.Var(
-                     v['name'], v['type'], v.get('default'), v.get('comment')
-                ) for v in result['needed_vars']]
-            return self.NeedInfoException(result['error'], needed_vars)
+
+        needed_vars = result.get('needed_vars')
+        if needed_vars or (resp_code == self.NeedInfoException.http_code):
+            return self.NeedInfoException(
+                result['error'], needed_vars, result.get('resource'))
         elif resp_code in (401, 403, 407):
             exc = PermissionError
         elif resp_code in (404, ):
@@ -1383,7 +1389,11 @@ Content-Length: %d
     def _wrap_drain_and_close(self, raw_method):
         async def draining_raw_method(request_obj, *args, **kwargs):
             try:
-                return await raw_method(request_obj, *args, **kwargs)
+                if inspect.isasyncgenfunction(raw_method):
+                    async for r in raw_method(request_obj, *args, **kwargs):
+                        pass
+                else:
+                    await raw_method(request_obj, *args, **kwargs)
             except Exception as e:
                 import traceback
                 err = {'error': str(e)}
@@ -1438,7 +1448,12 @@ Content-Length: %d
                     if first:
                         if not mimetype and isinstance(resp, dict):
                             if 'finished' in resp and 'error' in resp:
-                                re = RemoteError(resp['error'])
+                                if 'needed_vars' in resp:
+                                    re = self.NeedInfoException(resp['error'])
+                                    re.needed_vars = resp['needed_vars']
+                                    re.resource = resp['resource']
+                                else:
+                                    re = RemoteError(resp['error'])
                                 re.http_code = resp['finished']
                                 raise re
 
@@ -1461,6 +1476,7 @@ Content-Length: %d
                 if hasattr(e, 'needed_vars'):
                     # NeedInfoException
                     data['needed_vars'] = e.needed_vars
+                    data['resource'] = e.resource
                 elif request_obj.authed:
                     import traceback
                     data['traceback'] = traceback.format_exc()

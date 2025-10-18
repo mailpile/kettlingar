@@ -54,7 +54,7 @@ class WebKitten:
         if self.prefix and request_info.path.startswith(self.prefix):
             return (self._web_handle, None)
 
-        return self.old_default_methods(request_info)
+        return self.rpc_default_methods(request_info)
 
     def _jinja(self):
         if self.jinja is None:

@@ -7,7 +7,7 @@ class RPCKittenVarz:
     that adds metrics/stats.
     """
     METRICS_COUNT = 'count'
-    METRICS_GUAGE = 'guage'
+    METRICS_GAUGE = 'gauge'
     METRICS_SAMPLE = 'sample'
     METRICS_TYPE_MAP = '_type_map'
     METRICS_MAX_SAMPLES = 25
@@ -32,13 +32,13 @@ class RPCKittenVarz:
     def _get_stats(self, public):
         return self.stats_public if public else self.stats_private
 
-    def metrics_guage(self, key, val, public=False):
+    def metrics_gauge(self, key, val, public=False):
         """
-        Update a guage metric (like a spedometor, a current numeric value).
+        Update a gauge metric (like a spedometor, a current numeric value).
         """
         stats = self._get_stats(public)
-        stats[key] = stats.get(key, val)
-        stats[self.METRICS_TYPE_MAP][key] = self.METRICS_GUAGE
+        stats[key] = val
+        stats[self.METRICS_TYPE_MAP][key] = self.METRICS_GAUGE
 
     def metrics_count(self, key, cnt=1, public=False):
         """
@@ -96,7 +96,7 @@ class RPCKittenVarz:
         """
         varz = {}
         if self.start_time:
-            self.metrics_guage('start_time', self.start_time)
+            self.metrics_gauge('start_time', self.start_time)
         varz.update(self.stats_public)
 
         if request_info.authed:
