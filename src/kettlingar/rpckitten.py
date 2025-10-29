@@ -447,11 +447,11 @@ class RPCKitten:
             self._convenience_methods.add(fname)
             setattr(self, fname, mk_func(fname, **finfo))
 
-    def synchronous(self):
+    def sync_proxy(self):
         """
-        Return an instance of this object which has all the async methods
-        re-wrapped for synchronous invocation. This will create and start a
-        helper thread which runs the asyncio event loop behind the scenes.
+        Return a proxy object which wraps all the async methods so they can
+        be used synchronously (not async). This creates and starts a helper
+        thread which runs an asyncio event loop behind the scenes.
         """
         from .asynctools import SyncProxy
         return SyncProxy(self)

@@ -35,10 +35,12 @@ class SyncProxy:
     def _worker_thread(self):
         asyncio.run(self._worker_thread_main())
 
-    def _check_exception(self, result):
+    def _check_return_value(self, result):
         if (isinstance(result, tuple) and len(result)
                 and result[0] is self._EXCEPTION_MARKER):
             raise result[1]
+        elif result is self._obj:
+            return self
         return result
 
     def _wrap(self, async_method):
@@ -52,13 +54,13 @@ class SyncProxy:
                     result = rq.get()
                     if result is self._EOF_RESULT_MARKER:
                         return
-                    yield self._check_exception(result)
+                    yield self._check_return_value(result)
 
         elif inspect.iscoroutinefunction(async_method):
             def wrapper(*args, **kwargs):
                 rq = queue.Queue()
                 self._jobs.put((False, async_method, args, kwargs, rq))
-                return self._check_exception(rq.get())
+                return self._check_return_value(rq.get())
 
         else:
             wrapper = async_method

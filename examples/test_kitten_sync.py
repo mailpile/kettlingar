@@ -9,7 +9,7 @@ def test_function():
     if loopback:
         args.remove('--loopback')
 
-    kitty = MyKitten(args=args).synchronous()
+    kitty = MyKitten(args=args).sync_proxy()
     if loopback:
         kitty.loopback()
     else:
