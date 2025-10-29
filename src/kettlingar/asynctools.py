@@ -10,11 +10,11 @@ class SyncProxy:
         import queue, threading
         self._obj = async_object
         self._wrapped = {}
+        self._keep_running = True
         self._jobs = queue.Queue()
         self._loop = threading.Thread(target=self._worker_thread)
         self._loop.daemon = True
         self._loop.start()
-        self._keep_running = True
 
     _EOF_RESULT_MARKER = '<EOF-RESULT-MARKER>'
     _EXCEPTION_MARKER = '<EXCEPTION-MARKER>'
@@ -69,7 +69,7 @@ class SyncProxy:
 
     def __getattr__(self, key):
         if key.startswith('_'):
-            return super().__getattr__(key)
+            return super().__getattribute__(key)
         v = self._wrapped.get(key)
         if v is None:
             v = self._wrapped[key] = self._wrap(getattr(self._obj, key))

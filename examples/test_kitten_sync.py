@@ -17,6 +17,7 @@ def test_function():
 
     print('Pinged: %s' % kitty.ping())
     print('Our first meow: %s' % (kitty.meow()))
+    print('Our first stretch: %s' % (kitty.stretch()))
 
     try:
         kitty.freakout()

@@ -5,6 +5,15 @@ from kettlingar import RPCKitten
 from kettlingar.metrics import RPCKittenVarz
 
 
+class ExtraMethods:
+    async def api_stretch(self, request_info):
+        """/stretch
+
+        Have a nice stretch.
+        """
+        return ('text/plain', 'Streeeeeeeetch!\n')
+
+
 class MyKitten(RPCKitten, RPCKittenVarz):
     """mykitten - A sample kettlingar microservice
 
@@ -95,6 +104,7 @@ class MyKitten(RPCKitten, RPCKittenVarz):
         Dynamically create a `mrow` method during initialization.
         """
         self.api_mrow = self.api_both
+        self.expose_methods(ExtraMethods())
         return servers
 
 

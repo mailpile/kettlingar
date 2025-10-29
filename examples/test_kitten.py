@@ -22,6 +22,7 @@ async def test_function():
 
     print('Pinged: %s' % await kitty.ping())
     print('Our first meow: %s' % (await kitty.meow()))
+    print('Our first stretch: %s' % (await kitty.stretch()))
 
     # Send overlapping requests (demonstrate things do not block)
     m1 = asyncio.create_task(call_slow_meow(kitty, "Meow 1"))

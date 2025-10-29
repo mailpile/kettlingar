@@ -372,21 +372,23 @@ class RPCKitten:
             pass
         return []
 
-    def _fnames_and_api_funcs(self):
-        for api_fname in dir(self):
+    def _fnames_and_api_funcs(self, obj=None):
+        if obj is None:
+            obj = self
+        for api_fname in dir(obj):
             # This order matters, it should match _handle_http_request rules
             for prefix in ('raw_', 'api_', 'public_raw_', 'public_api_'):
                 if api_fname.startswith(prefix):
-                    api_func = getattr(self, api_fname)
+                    api_func = getattr(obj, api_fname)
                     fname = api_fname[len(prefix):]
-                    if ((not hasattr(self, fname))
+                    if ((not hasattr(obj, fname))
                             or (fname in self._convenience_methods)):
                         yield fname, api_func
                         break
 
-    def _all_commands(self):
+    def _all_commands(self, obj=None):
         found = {}
-        for fname, api_func in self._fnames_and_api_funcs():
+        for fname, api_func in self._fnames_and_api_funcs(obj=obj):
             try:
                 found[fname] = {
                     'api_method': api_func,
@@ -461,8 +463,8 @@ class RPCKitten:
         Use this instead of connect() to behave as a library, handling
         everything locally (without launching a service process).
         """
-        self._setup_service()
         self._servers = await self.init_servers([])
+        self._setup_service()
 
     async def connect(self, auto_start=False, retry=3):
         """
@@ -944,18 +946,36 @@ class RPCKitten:
             else:
                 return writer, 500, _b(mt), enc({'error': str(e)})
 
+    def expose_methods(self, obj):
+        """
+        Add API methods defined in `obj` to our exposed API.
+
+        This will also set `obj.config = self.config` so API methods
+        defined this way can still see the kitten configuration. The
+        naming convention for exposed methods is the same as for methods
+        written directly on the kitten class (`api_` etc).
+        """
+        if not hasattr(obj, 'config'):
+            obj.config = self.config
+        for cmd in self._all_commands(obj).values():
+            fname = cmd['api_method'].__name__
+            if hasattr(self, fname):
+                raise KeyError('Conflict, method already exists: %s' % fname)
+            setattr(self, fname, cmd['api_method'])
+
     async def init_servers(self, servers):
         """
         Subclasses can override this with initialization logic.
 
         This function should return the (potentially modified) list of
-        server instances.
+        server instances. It only runs in the service process.
 
         Note: that one of the things that can happen here, is to add
-        `api_*` methods to the class. They will be exposed for remote
-        invocation and advertised during .connect()/.ping().  This
-        allows for lazy-loading bulky code, keeping the client slim
-        and fast.
+              `api_*` methods to the class, directly or by using the
+        `.expose_methods()` helper.  These new methods will be exposed
+        for remote invocation and advertised during .connect()/.ping().
+        This allows for lazy-loading bulky code, keeping the client
+        slim and fast.
         """
         return servers
 
