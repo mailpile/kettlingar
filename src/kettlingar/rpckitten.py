@@ -447,6 +447,15 @@ class RPCKitten:
             self._convenience_methods.add(fname)
             setattr(self, fname, mk_func(fname, **finfo))
 
+    def synchronous(self):
+        """
+        Return an instance of this object which has all the async methods
+        re-wrapped for synchronous invocation. This will create and start a
+        helper thread which runs the asyncio event loop behind the scenes.
+        """
+        from .asynctools import SyncProxy
+        return SyncProxy(self)
+
     async def loopback(self):
         """
         Use this instead of connect() to behave as a library, handling

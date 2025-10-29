@@ -147,6 +147,12 @@ async def test_function():
 asyncio.run(test_function())
 ```
 
+If you prefer to write synchronous code (instead of async),
+that is possible as well,
+but will be somewhat less efficient.
+See [test_kitten_sync](examples/test_kitten_sync.py) for an example.
+
+
 # Writing API endpoints
 
 As illustrated above,

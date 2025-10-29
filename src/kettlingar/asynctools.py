@@ -5,6 +5,75 @@ import time
 import traceback
 
 
+class SyncProxy:
+    def __init__(self, async_object):
+        import queue, threading
+        self._obj = async_object
+        self._wrapped = {}
+        self._jobs = queue.Queue()
+        self._loop = threading.Thread(target=self._worker_thread)
+        self._loop.daemon = True
+        self._loop.start()
+        self._keep_running = True
+
+    _EOF_RESULT_MARKER = '<EOF-RESULT-MARKER>'
+    _EXCEPTION_MARKER = '<EXCEPTION-MARKER>'
+
+    async def _worker_thread_main(self):
+        while self._keep_running:
+            is_generator, fn, args, kwargs, rq = self._jobs.get()
+            try:
+                if is_generator:
+                    async for result in fn(*args, **kwargs):
+                        rq.put(result)
+                    rq.put(self._EOF_RESULT_MARKER)
+                else:
+                    rq.put(await fn(*args, **kwargs))
+            except Exception as e:
+                rq.put((self._EXCEPTION_MARKER, e))
+
+    def _worker_thread(self):
+        asyncio.run(self._worker_thread_main())
+
+    def _check_exception(self, result):
+        if (isinstance(result, tuple) and len(result)
+                and result[0] is self._EXCEPTION_MARKER):
+            raise result[1]
+        return result
+
+    def _wrap(self, async_method):
+        import inspect, queue
+
+        if inspect.isasyncgenfunction(async_method):
+            def wrapper(*args, **kwargs):
+                rq = queue.Queue()
+                self._jobs.put((True, async_method, args, kwargs, rq))
+                while True:
+                    result = rq.get()
+                    if result is self._EOF_RESULT_MARKER:
+                        return
+                    yield self._check_exception(result)
+
+        elif inspect.iscoroutinefunction(async_method):
+            def wrapper(*args, **kwargs):
+                rq = queue.Queue()
+                self._jobs.put((False, async_method, args, kwargs, rq))
+                return self._check_exception(rq.get())
+
+        else:
+            wrapper = async_method
+
+        return wrapper
+
+    def __getattr__(self, key):
+        if key.startswith('_'):
+            return super().__getattr__(key)
+        v = self._wrapped.get(key)
+        if v is None:
+            v = self._wrapped[key] = self._wrap(getattr(self._obj, key))
+        return v
+
+
 class FileWriter:
     def __init__(self, fd):
         self.fd = fd

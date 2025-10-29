@@ -75,6 +75,13 @@ class MyKitten(RPCKitten, RPCKittenVarz):
         async for purr in self.purr(1):
             yield None, purr
 
+    async def api_freakout(self, request_info):
+        """/freakout
+
+        Raise an exception.
+        """
+        raise ValueError('Nothing is good enough for me!')
+
     def get_default_methods(self, request_info):
         """/*
 
