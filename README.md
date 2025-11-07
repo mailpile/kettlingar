@@ -19,6 +19,7 @@ Some features:
 - Allows generator functions to incrementally provide results
 - Supports passing open file descriptors to or from the microservice
 - Supports msgpack (preferred) or JSON for RPC request/response
+- Python type annotations are used to validate/convert arguments
 - Serve over TCP/IP and over a local unix domain socket
 - Built in CLI for configuring, running and interacting with the service
 
@@ -32,12 +33,12 @@ Status: Useful!
 TODO:
 
 - Write automated tests
-- Use type hinting for fun and profit
 - Improve and document how we do logging
 - Improve and document varz and internal stats
 - Document the `public_raw_` and `raw_` magic prefixes
 - Document error handling / exception propogation
 - Add websocket support
+- Use types and annotations to bring more clarity to return values
 
 If you think you can help with any of those, feel free to ping me!
 
@@ -84,10 +85,8 @@ class MyKitten(RPCKitten):
             'text/plain',           # Fixed MIME type of `text/plain`
             'Meow world, meow!\n')  # Meow!
 
-    async def api_purr(self, request_info, count=1, purr='purr'):
+    async def api_purr(self, request_info, count:int=1, purr:str='purr'):
         _format = self.config.worker_name + ' says %(purr)s'
-
-        count = int(count)              # CLI users will send us strings
 
         for i in range(count):
             result = {

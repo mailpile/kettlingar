@@ -53,7 +53,7 @@ class MyKitten(RPCKitten, RPCKittenVarz):
         await asyncio.sleep(delay)
         return ('text/plain', 'Meow world, meow after %.2fs!\n' % delay)
 
-    async def api_purr(self, request_info, count=1, purr='purr'):
+    async def api_purr(self, request_info, count:int=1, purr:str='purr'):
         """/purr [--count=<N>] [--purr=<sound>]
 
         Authenticated endpoint taking a single argument. The response
@@ -64,7 +64,6 @@ class MyKitten(RPCKitten, RPCKittenVarz):
         be an async generator yielding results as they are received.
         """
         _format = self.config.worker_name + ' says %(purr)s'
-        count = int(count)               # CLI users send strings
         for i in range(count):
             result = {
                 'purr': purr * (i + 1),  # Purring!

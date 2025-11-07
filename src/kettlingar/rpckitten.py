@@ -8,6 +8,7 @@ import os
 import socket
 import sys
 import time
+import types
 import urllib.parse
 
 try:
@@ -387,12 +388,29 @@ class RPCKitten:
                         break
 
     def _all_commands(self, obj=None):
+        def _typename(typ):
+            if typ is None:
+                return None
+            if isinstance(typ, types.UnionType):
+                return repr(typ)
+            return typ.__name__
+
+        def _exa(args, fullargspec):
+            explained = {}
+            annotations = fullargspec.annotations or {}
+            for arg in args:
+                explained[arg] = _typename(annotations.get(arg))
+            return explained
+
         found = {}
         for fname, api_func in self._fnames_and_api_funcs(obj=obj):
             try:
+                fullargspec = inspect.getfullargspec(api_func)
                 found[fname] = {
                     'api_method': api_func,
-                    'fullargspec': inspect.getfullargspec(api_func),
+                    'args': _exa(fullargspec.args[2:], fullargspec),
+                    'options': _exa(fullargspec.kwonlyargs, fullargspec),
+                    'returns': _typename(fullargspec.annotations.get('return')),
                     'is_generator': inspect.isasyncgenfunction(api_func)}
             except TypeError:
                 pass
@@ -407,39 +425,42 @@ class RPCKitten:
     api_addr = property(lambda s: s._peeraddr)
     api_secret = property(lambda s: s._secret)
 
+    def _mk_lcfunc(self, fname, api_method=None, is_generator=False, **kwa):
+        if is_generator:
+            async def _func(*args, **kwargs):
+                async for result in api_method(None, *args, **kwargs):
+                    yield result[1]
+        else:
+            async def _func(*args, **kwargs):
+                ctype, data = await api_method(None, *args, **kwargs)
+                if ctype is None:
+                    return data
+                else:
+                    data = bytearray(data, 'utf-8') if isinstance(data, str) else data
+                    return {'mimetype': ctype, 'data': data}
+        return _func
+
+    def _mk_rcfunc(self, fname, api_method=None, is_generator=False, **kwa):
+        if is_generator:
+            async def _func(*args, **kwargs):
+                _generator = await self.call(fname, *args, **kwargs)
+                if isinstance(_generator, dict):
+                    # This happens with call_reply_to
+                    yield _generator
+                else:
+                    async for result in _generator():
+                        yield result
+        else:
+            async def _func(*args, **kwargs):
+                return await self.call(fname, *args, **kwargs)
+        return _func
+
     def _local_convenience_methods(self):
-        def _mk_func(fname, api_method=None, is_generator=False, **kwa):
-            if is_generator:
-                async def _func(*args, **kwargs):
-                    async for result in api_method(None, *args, **kwargs):
-                        yield result[1]
-            else:
-                async def _func(*args, **kwargs):
-                    ctype, data = await api_method(None, *args, **kwargs)
-                    if ctype is None:
-                        return data
-                    else:
-                        data = bytearray(data, 'utf-8') if isinstance(data, str) else data
-                        return {'mimetype': ctype, 'data': data}
-            return _func
-        self._make_convenience_methods(_mk_func)
+        self._make_convenience_methods(self._mk_lcfunc)
 
     def _remote_convenience_methods(self, extra_methods=None):
-        def _mk_func(fname, api_method=None, is_generator=False, **kwa):
-            if is_generator:
-                async def _func(*args, **kwargs):
-                    _generator = await self.call(fname, *args, **kwargs)
-                    if isinstance(_generator, dict):
-                        # This happens whith call_reply_to
-                        yield _generator
-                    else:
-                        async for result in _generator():
-                            yield result
-            else:
-                async def _func(*args, **kwargs):
-                    return await self.call(fname, *args, **kwargs)
-            return _func
-        self._make_convenience_methods(_mk_func, extra_methods=extra_methods)
+        self._make_convenience_methods(self._mk_rcfunc,
+            extra_methods=extra_methods)
 
     def _make_convenience_methods(self, mk_func, extra_methods=None):
         method_info = self._all_commands()
@@ -852,6 +873,53 @@ class RPCKitten:
         exc = (AttributeError if request_obj.authed else PermissionError)
         raise exc(request_obj.path)
 
+    def guarantee_type(self, rule, v):
+        """
+        Guarantee value `v` has the class `rule`. This method is used
+        to translate type annotations on API functions, into argument
+        type validation and/or conversion.
+
+        In particular, when API methods are invoked from the shell using
+        the built-in CLI, they all arrive as strings and this function
+        should be able to convert reasonably formatted strings into the
+        appropriate data-type.
+
+        Input which is invalid or cannot be converted should raise an
+        exception.
+
+        Subclasses can override this to implement their own rules.
+        """
+        if rule in (None, 'any'):
+            return v
+        elif rule in (bool, 'bool'):
+            return self.Bool(v)
+        elif rule in (int, 'int'):
+            if isinstance(v, bytes):
+                v = str(v, 'utf-8')
+            if isinstance(v, str):
+                if v[:2] == '0x':
+                    return int(v[2:], 16)
+                elif v[:2] == '0o':
+                    return int(v[2:], 8)
+                elif v[:2] == '0b':
+                    return int(v[2:], 2)
+            return int(v)
+        else:
+            return rule(v)
+
+    def _apply_annotations(self, func, args, kwargs):
+        annotations = func.__annotations__
+        if args:
+            for i, k in enumerate(inspect.getfullargspec(func).args):
+                if k in annotations:
+                    annotations[i-2] = annotations[k]
+            for i, a in enumerate(args):
+                args[i] = self.guarantee_type(annotations.get(i), a)
+
+        if kwargs:
+            for k, v in kwargs.items():
+                kwargs[k] = self.guarantee_type(annotations.get(k), v)
+
     async def _handle_http_request(self, request_obj):
         def _b(v):
             return v if isinstance(v, bytes) else bytes(v, 'utf-8')
@@ -859,6 +927,7 @@ class RPCKitten:
         authed = request_obj.authed
         writer = request_obj.writer
         method_name = self.get_method_name(request_obj)
+        has_annotations = None
 
         if authed:
             raw_method = getattr(self, 'raw_' + method_name, None)
@@ -875,8 +944,10 @@ class RPCKitten:
 
         if raw_method:
             request_obj.handler = raw_method.__name__
+            has_annotations = raw_method if raw_method.__annotations__ else None
         else:
             request_obj.handler = api_method.__name__
+            has_annotations = api_method if api_method.__annotations__ else None
 
         args, kwargs = [], {}
         mt = request_obj.mimetype = 'application/json'
@@ -916,6 +987,9 @@ class RPCKitten:
                 await request_obj.writer.drain()
                 request_obj.writer.close()
                 request_obj.writer = writer
+
+        if has_annotations:
+            self._apply_annotations(has_annotations, args, kwargs)
 
         if inspect.isasyncgenfunction(api_method):
             raw_method = self._wrap_async_generator(api_method)
@@ -1562,7 +1636,6 @@ Content-Length: %d
                     except AttributeError:
                         pass
                 del i['api_method']
-                del i['fullargspec']
 
             body['pong'] = True
             body['conn'] = ':'.join(str(v) for v in request_obj.peer)
@@ -1807,8 +1880,9 @@ Content-Length: %d
     __API_COMMANDS__
 
     You can also treat any API method as a command and invoke it from
-    the command line. Add --json or --raw to alter whether/how the
-    output gets formatted. Pass --tcp to avoid the Unix domain socket.
+    the command line. Add --json/-j or --raw/-r to alter whether/how the
+    output gets formatted. Pass --tcp/-t to avoid the Unix domain socket,
+    and --json-rpc/-J to use JSON instead of msgpack serialization.
 
     Examples:
         rpckitten ping --json
@@ -1845,6 +1919,10 @@ Content-Length: %d
 
             def _print_result(result):
                 self.print_result(result, print_raw=print_raw, print_json=print_json)
+
+            def _fail(code, e):
+                sys.stderr.write('%s %s failed: %s\n' % (self.name, command, e))
+                sys.exit(code)
 
             try:
                 if args and command in ('start', 'stop', 'restart'):
@@ -1911,20 +1989,15 @@ Content-Length: %d
                     '%s: Not running: Start it first?\n' % self.name)
                 sys.exit(1)
             except KeyError as e:
-                sys.stderr.write('%s %s failed: %s\n' % (self.name, command, e))
-                sys.exit(2)
+                _fail(2, e)
             except ValueError as e:
-                sys.stderr.write('%s %s failed: %s\n' % (self.name, command, e))
-                sys.exit(3)
+                _fail(3, e)
             except IOError as e:
-                sys.stderr.write('%s %s failed: %s\n' % (self.name, command, e))
-                sys.exit(4)
+                _fail(4, e)
             except PermissionError as e:
-                sys.stderr.write('%s %s failed: %s\n' % (self.name, command, e))
-                sys.exit(5)
+                _fail(5, e)
             except RuntimeError as e:
-                sys.stderr.write('%s %s failed: %s\n' % (self.name, command, e))
-                sys.exit(6)
+                _fail(6, e)
 
         try:
             # FIXME: Allow options or environment variables that tweak
