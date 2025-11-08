@@ -428,10 +428,16 @@ class RPCKitten:
     def _mk_lcfunc(self, fname, api_method=None, is_generator=False, **kwa):
         if is_generator:
             async def _func(*args, **kwargs):
+                if api_method.__annotations__:
+                    args = list(args)
+                    self._apply_annotations(api_method, args, kwargs)
                 async for result in api_method(None, *args, **kwargs):
                     yield result[1]
         else:
             async def _func(*args, **kwargs):
+                if api_method.__annotations__:
+                    args = list(args)
+                    self._apply_annotations(api_method, args, kwargs)
                 ctype, data = await api_method(None, *args, **kwargs)
                 if ctype is None:
                     return data
@@ -1313,6 +1319,9 @@ class RPCKitten:
         """
         t0 = time.time()
 
+        if not self._url:
+            raise self.NotRunning('Please .connect() first')
+
         use_json = (self.Bool(kwargs.pop(self.CALL_USE_JSON, False))
             or (msgpack is None))
 
@@ -1418,13 +1427,14 @@ Content-Length: %d
                 'CALL %s(%s)%s %s %.2fms',
                 fn, str_args(args), fds, resp_code, rtime)
 
-    async def ping(self, allow_unix=True):
+    async def ping(self, allow_unix=True, docs=False):
         """
         Check whether the service is running.
         """
         if self.is_client:
             self._peeraddr = None
             return await self.call('ping',
+                docs=docs,
                 call_max_tries=0,
                 call_allow_unix=allow_unix)
         else:

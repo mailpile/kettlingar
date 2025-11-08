@@ -23,6 +23,7 @@ class MyKitten(RPCKitten, RPCKittenVarz):
     class Configuration(RPCKitten.Configuration):
         APP_NAME = 'mykitten'
         WORKER_NAME = 'Kitty'
+        SLEEP_TIME = 1
 
     async def public_api_web_root(self, request_info):
         """/
@@ -44,17 +45,21 @@ class MyKitten(RPCKitten, RPCKittenVarz):
             'text/plain',           # Fixed MIME type of `text/plain`
             'Meow world, meow!\n')  # Meow!
 
-    async def public_api_slow_meow(self, request_info):
+    async def public_api_slow_meow(self, request_info, delay:float=None):
         """/slow_meow
 
         Same as above, but with a random delay before responding.
         """
-        delay = random.randint(0, 75) / 100.0
+        if delay is None:
+            delay = self.config.sleep_time * random.randint(0, 75) / 100.0
         await asyncio.sleep(delay)
         return ('text/plain', 'Meow world, meow after %.2fs!\n' % delay)
 
-    async def api_purr(self, request_info, count:int=1, purr:str='purr'):
-        """/purr [--count=<N>] [--purr=<sound>]
+    async def api_purr(self, request_info,
+            count:int=1,
+            purr:str='purr',
+            caps:bool=False):
+        """/purr [--count=<N>] [--purr=<sound>] [--caps=Y]
 
         Authenticated endpoint taking a single argument. The response
         will be encoded as JSON or using msgpack, depending on what the
@@ -68,11 +73,13 @@ class MyKitten(RPCKitten, RPCKittenVarz):
             result = {
                 'purr': purr * (i + 1),  # Purring!
                 '_format': _format}      # Formatting rule for CLI interface
+            if caps:
+                result['purr'] = result['purr'].upper()
 
             yield (
                 None,                    # No MIME-type, let framework choose
                 result)                  # Result object
-            await asyncio.sleep(1)
+            await asyncio.sleep(self.config.sleep_time)
 
     async def api_both(self, request_info):
         """/both

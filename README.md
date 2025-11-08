@@ -364,7 +364,9 @@ pip install -e ".[dev]"
 
 ## Running Tests
 
-We really should have some automated tests, shouldn't we?
+```bash
+pytest tests
+```
 
 
 # Contributing
