@@ -164,6 +164,10 @@ These functions must always take at least one positional argument
 and must either return a single tuple of `(mime-type, data)`,
 or implement a generator which yields such tuples.
 
+Arguments after `request_info` (both positional and keyword arguments) are part of the exposed API.
+If the arguments have type hints,
+`kettlingar` will automatically convert/validate incoming data accordingly.
+
 The functions should also have docstrings which explain what they do and how to use them.
 
 The functions can access (or modify!) the microservice configuration,
