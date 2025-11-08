@@ -22,18 +22,16 @@ include = ["kettlingar*"]
 [tool.setuptools.dynamic]
 version = {attr = "kettlingar.__version__.__version__"}
 
-[tool.ruff]
-line-length = 120
-target-version = "py310"
-lint.select = ["I"]# implementation for isort
+[tool.pylint]
+disable = [
+    "C0209",  # Consider using f-string
+    'R0801',  # Similar lines in multiple files
+]
 
 [project.optional-dependencies]
 dev = [
-    "mkdocs-material>=9.5.49",
-    "mkdocs>=1.6.1",
     "pytest>=8.3.4",
-    "ruff>=0.8.4",
-    "uv>=0.5.12",
+    "pylint>=4.0.2",
 ]
 public = [
     "upagekite>=0.3.2",
