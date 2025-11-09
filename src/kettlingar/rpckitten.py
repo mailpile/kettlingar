@@ -1,3 +1,6 @@
+"""
+RPC Kittens! Cute asyncio HTTP-RPC microservices for fun and profit.
+"""
 import asyncio
 import array
 import copy
@@ -27,7 +30,23 @@ except ImportError:
     signal = None
 
 from .asynctools import create_background_task, await_success, FileWriter
-from .str_utils import str_addr, str_args
+from .str_utils import str_args
+
+
+# Apparently, this code is just too much!
+#
+# pylint: disable=too-many-lines
+# pylint: disable=too-many-locals
+# pylint: disable=too-many-returns
+# pylint: disable=too-many-branches
+# pylint: disable=too-many-arguments
+# pylint: disable=too-many-statements
+# pylint: disable=too-many-public-methods
+# pylint: disable=too-many-return-statements
+# pylint: disable=too-many-instance-attributes
+# pylint: disable=too-many-positional-arguments
+# pylint: disable=bare-except
+# pylint: disable=broad-exception-caught
 
 
 def _mkdirp(path, mode):
@@ -74,11 +93,11 @@ class RequestInfo:
     fileno = property(lambda s: s.writer._transport._sock.fileno())
     via_unix_domain = property(lambda s: s.peer[0] == RPCKitten.PEER_UNIX_DOMAIN)
 
-    def write(req, *data, writer=None):
+    def write(self, *data, writer=None):
         data = b''.join(
             (bytes(d, 'utf-8') if isinstance(d, str) else d) for d in data)
-        (writer or req.writer).write(data)
-        req.sent += len(data)
+        (writer or self.writer).write(data)
+        self.sent += len(data)
         return len(data)
 
 
@@ -184,6 +203,9 @@ class RPCKitten:
 
         _METHODS = ('as_dict', 'configure')
 
+        # pylint: disable=access-member-before-definition
+        # pylint: disable=attribute-defined-outside-init
+
         def __init__(self):
             for cls in self.__class__.__mro__:
                 for akey in cls.__dict__:
@@ -209,7 +231,7 @@ class RPCKitten:
             return results
 
         def _default_config_file(self):
-             return os.path.join(self.app_data_dir, self.worker_name + '.cfg')
+            return os.path.join(self.app_data_dir, self.worker_name + '.cfg')
 
         def _set_defaults(self):
             for akey in self.__dict__:
@@ -239,7 +261,7 @@ class RPCKitten:
                 return line.strip()
 
             file_config = []
-            with open(path, 'r') as fd:
+            with open(path, 'r', encoding='utf-8') as fd:
                 for line in (_clean_line(l) for l in fd):
                     if line:
                         key, val = (p.strip() for p in line.split('='))
@@ -425,7 +447,7 @@ class RPCKitten:
     api_addr = property(lambda s: s._peeraddr)
     api_secret = property(lambda s: s._secret)
 
-    def _mk_lcfunc(self, fname, api_method=None, is_generator=False, **kwa):
+    def _mk_lcfunc(self, _fn, api_method=None, is_generator=False, **_kwa):
         if is_generator:
             async def _func(*args, **kwargs):
                 if api_method.__annotations__:
@@ -441,12 +463,11 @@ class RPCKitten:
                 ctype, data = await api_method(None, *args, **kwargs)
                 if ctype is None:
                     return data
-                else:
-                    data = bytearray(data, 'utf-8') if isinstance(data, str) else data
-                    return {'mimetype': ctype, 'data': data}
+                data = bytearray(data, 'utf-8') if isinstance(data, str) else data
+                return {'mimetype': ctype, 'data': data}
         return _func
 
-    def _mk_rcfunc(self, fname, api_method=None, is_generator=False, **kwa):
+    def _mk_rcfunc(self, fname, is_generator=False, **_kwa):
         if is_generator:
             async def _func(*args, **kwargs):
                 _generator = await self.call(fname, *args, **kwargs)
@@ -502,7 +523,7 @@ class RPCKitten:
 
         for tried in range(0, retry + 1):
             try:
-                with open(self._urlfile, 'r') as fd:
+                with open(self._urlfile, 'r', encoding='utf-8') as fd:
                     self._url = fd.read().strip()
 
                 pong = await self.call('ping', call_max_tries=0)
@@ -511,7 +532,7 @@ class RPCKitten:
                     self._remote_convenience_methods(extra_methods=methods)
                     return self
 
-            except (OSError, RuntimeError) as e:
+            except (OSError, RuntimeError):
                 pass
 
             if auto_start:
@@ -545,7 +566,6 @@ class RPCKitten:
         """
         Cleanup code run on shutdown. Subclasses can override this.
         """
-        pass
 
     def _real_shutdown(self, exitcode=0):
         self._remove_files()
@@ -560,13 +580,13 @@ class RPCKitten:
         os._exit(exitcode)
 
     def _init_logging(self):
-        rootLogger = logging.getLogger()
-        rootLogger.setLevel(self.config.worker_log_level)
-        if not rootLogger.hasHandlers():
+        root_logger = logging.getLogger()
+        root_logger.setLevel(self.config.worker_log_level)
+        if not root_logger.hasHandlers():
             fmt = "%(asctime)s %(process)d %(levelname).1s %(message)s"
-            stderrLog = logging.StreamHandler()
-            stderrLog.setFormatter(logging.Formatter(fmt))
-            rootLogger.addHandler(stderrLog)
+            stderr_log = logging.StreamHandler()
+            stderr_log.setFormatter(logging.Formatter(fmt))
+            root_logger.addHandler(stderr_log)
 
     def logger(self, level, fmt, *args):
         """
@@ -637,7 +657,7 @@ class RPCKitten:
                 sock_desc = self.PEER_UNIX_DOMAIN + ':0'
 
             self._url = self._make_url(sock_desc)
-            with open(self._urlfile, 'w') as fd:
+            with open(self._urlfile, 'w', encoding='utf-8') as fd:
                 fd.flush()
                 os.chmod(self._urlfile, 0o600)
                 fd.write(self._url)
@@ -685,7 +705,7 @@ class RPCKitten:
                     eom = eol + eol
                     hend = request.index(eom)
                     header = str(request[:hend], 'utf-8')
-                except ValueError as e:
+                except ValueError:
                     pass
                 if header:
                     hlines = header.splitlines()
@@ -718,14 +738,13 @@ class RPCKitten:
             # the request_obj target changes (response redirection).
             return req.write(*data, writer=writer)
 
-        t0 = time.time()
         sent = 0
         fds_ok = False
-        method = path = version = peer = sent = ''
-        code = 500
+        method = path = _version = peer = sent = ''
+        req.code = 500
         try:
             head, hdrs, body, fds = await self._http11(reader, writer, fds=True)
-            method, path, version = head.split(None, 3)[:3]
+            method, path, _version = head.split(None, 3)[:3]
             peer = writer._transport._sock.getpeername()
             if not peer:
                 peer = [self.PEER_UNIX_DOMAIN]
@@ -897,21 +916,20 @@ class RPCKitten:
         """
         if rule in (None, 'any'):
             return v
-        elif rule in (bool, 'bool'):
+        if rule in (bool, 'bool'):
             return self.Bool(v)
-        elif rule in (int, 'int'):
+        if rule in (int, 'int'):
             if isinstance(v, bytes):
                 v = str(v, 'utf-8')
             if isinstance(v, str):
                 if v[:2] == '0x':
                     return int(v[2:], 16)
-                elif v[:2] == '0o':
+                if v[:2] == '0o':
                     return int(v[2:], 8)
-                elif v[:2] == '0b':
+                if v[:2] == '0b':
                     return int(v[2:], 2)
             return int(v)
-        else:
-            return rule(v)
+        return rule(v)
 
     def _apply_annotations(self, func, args, kwargs):
         annotations = func.__annotations__
@@ -946,6 +964,11 @@ class RPCKitten:
             api_method = getattr(self, 'public_api_' + method_name, None)
 
         if not raw_method and not api_method:
+            # Note: This raises by default, but subclasses may override
+            #       and give us something to work with.
+            #
+            # pylint: disable=assignment-from-no-return
+            # pylint: disable=unpacking-non-sequence
             api_method, raw_method = self.get_default_methods(request_obj)
 
         if raw_method:
@@ -984,7 +1007,6 @@ class RPCKitten:
             args = [self._fd_from_magic_arg(a, request_obj.fds) for a in args]
             if request_obj.body.pop(self.REPLY_TO_FIRST_FD, False):
                 fd = args.pop(0)
-                loop = asyncio.get_running_loop()
                 if isinstance(fd, socket.socket):
                     _, writer = await asyncio.open_connection(sock=fd)
                 else:
@@ -1023,8 +1045,7 @@ class RPCKitten:
                 return writer, 500, _b(mt), enc({
                     'error': str(e),
                     'traceback': traceback.format_exc()})
-            else:
-                return writer, 500, _b(mt), enc({'error': str(e)})
+            return writer, 500, _b(mt), enc({'error': str(e)})
 
     def expose_methods(self, obj):
         """
@@ -1199,7 +1220,7 @@ class RPCKitten:
         return msgpack.unpackb(d, ext_hook=_from_exttype)
 
     async def _url_connect(self, url, allow_unix=True):
-        proto, _, host_port, path = url.split('/', 3)
+        _proto, _, host_port, path = url.split('/', 3)
 
         allow_unix &= bool(self._peeraddr or not self.config.worker_use_tcp)
         if self._unixfile and allow_unix:
@@ -1258,8 +1279,8 @@ class RPCKitten:
             finally:
                 reader._transport.resume_reading()
             return None, []
-        else:
-            return (await reader.read(bufsize)), []
+
+        return (await reader.read(bufsize)), []
 
     def _fd_to_magic_arg(self, a):
         if hasattr(a, 'fileno'):
@@ -1284,7 +1305,7 @@ class RPCKitten:
         return a
 
     def _get_exception(self, resp_code, result):
-        logging.debug('_get_exception(%s, %s)' % (resp_code, result))
+        logging.debug('_get_exception(%s, %s)', resp_code, result)
         exc = RuntimeError
         try:
             resp_code = int(resp_code)
@@ -1295,7 +1316,8 @@ class RPCKitten:
         if needed_vars or (resp_code == self.NeedInfoException.http_code):
             return self.NeedInfoException(
                 result['error'], needed_vars, result.get('resource'))
-        elif resp_code in (401, 403, 407):
+
+        if resp_code in (401, 403, 407):
             exc = PermissionError
         elif resp_code in (404, ):
             exc = KeyError
@@ -1345,8 +1367,7 @@ class RPCKitten:
             except:
                 if attempt >= retries:
                     raise
-                else:
-                    await self.connect(auto_start=(retries > 0), retry=1)
+                await self.connect(auto_start=(retries > 0), retry=1)
 
         reader, writer = io_pair
 
@@ -1437,8 +1458,7 @@ Content-Length: %d
                 docs=docs,
                 call_max_tries=0,
                 call_allow_unix=allow_unix)
-        else:
-            return {'pong': True, 'loopback': True}
+        return {'pong': True, 'loopback': True}
 
     async def quitquitquit(self):
         """
@@ -1446,9 +1466,8 @@ Content-Length: %d
         """
         if self.is_client:
             return await self.call('quitquitquit', call_max_tries=0)
-        else:
-            await self.shutdown()
-            return True
+        await self.shutdown()
+        return True
 
     def _http11_chunk(self, buffer):
         try:
@@ -1503,7 +1522,7 @@ Content-Length: %d
         async def draining_raw_method(request_obj, *args, **kwargs):
             try:
                 if inspect.isasyncgenfunction(raw_method):
-                    async for r in raw_method(request_obj, *args, **kwargs):
+                    async for _r in raw_method(request_obj, *args, **kwargs):
                         pass
                 else:
                     await raw_method(request_obj, *args, **kwargs)
@@ -1639,7 +1658,7 @@ Content-Length: %d
                 body = {}
 
             all_commands = self._all_commands()
-            for k, i in all_commands.items():
+            for _k, i in all_commands.items():
                 if kwa.get('docs'):
                     try:
                         i['help'] = i['api_method'].__doc__.rstrip()
@@ -1660,7 +1679,7 @@ Content-Length: %d
             # Not authed: do less work and don't let caller influence output
             request_obj.write(self._HTTP_200_STATIC_PONG)
 
-    async def api_config(self, request_obj,
+    async def api_config(self, _request_obj,
             reset=None,
             key=None,
             val=None,
@@ -1689,8 +1708,7 @@ Content-Length: %d
             hookname = 'on_config_%s' % key
             if hasattr(self, hookname):
                 return await getattr(self, hookname)()
-            else:
-                return key
+            return key
 
         if reset:
             default = getattr(self.config, reset.upper())
@@ -1722,7 +1740,7 @@ Content-Length: %d
                 filepath = self.config._default_config_file()
             else:
                 filepath = save
-            with open(filepath, 'w') as fd:
+            with open(filepath, 'w', encoding='utf-8') as fd:
                 fd.write(str(self.config))
 
         results.update({
@@ -1731,7 +1749,7 @@ Content-Length: %d
 
         return None, results
 
-    async def api_quitquitquit(self, request_obj):
+    async def api_quitquitquit(self, _request_obj):
         """/quitquitquit
 
         Shut down the microservice.
@@ -1751,7 +1769,7 @@ Content-Length: %d
         """
         return getattr(method, '__doc__', None)
 
-    async def api_help(self, request_obj, command=None):
+    async def api_help(self, _request_obj, command=None):
         """/help [command]
 
         Returns docstring-based help for existing API methods, or an
@@ -1768,14 +1786,14 @@ Content-Length: %d
 
             cmd_list = ['API Commands: ']
             first = True
-            for command in sorted(list(self._all_commands().keys())):
-                if command in ('ping', 'help', 'config', 'quitquitquit', 'ws'):
+            for cmd in sorted(list(self._all_commands().keys())):
+                if cmd in ('ping', 'help', 'config', 'quitquitquit', 'ws'):
                     continue
-                if len(cmd_list[-1]) + len(command) > 75:
+                if len(cmd_list[-1]) + len(cmd) > 75:
                     cmd_list.append('   ')
                 elif not first:
                     cmd_list[-1] += ', '
-                cmd_list[-1] += command
+                cmd_list[-1] += cmd
                 first = False
             main_doc = main_doc.replace('__API_COMMANDS__', '\n'.join(cmd_list))
 
@@ -1796,7 +1814,7 @@ Content-Length: %d
         return None, doc(None)
 
     @classmethod
-    def Bool(cls, value):
+    def Bool(cls, value):  # pylint: disable=invalid-name
         """
         This is a convenience method for API functions to convert an
         incoming argument to boolean. It recognizes the strings
@@ -1843,11 +1861,10 @@ Content-Length: %d
         return [a for a in args if not _is_arg(a)], kwargs
 
     @classmethod
-    def TextFormat(cls, result):
+    def TextFormat(cls, result):  # pylint: disable=invalid-name
         if isinstance(result, dict) and '_format' in result:
             return result.pop('_format')
-        else:
-            return '%s'
+        return '%s'
 
     def print_result(self, result, print_raw=False, print_json=False):
         if print_raw:
@@ -1862,7 +1879,7 @@ Content-Length: %d
 
     @classmethod
     def _cli_collect_needed_info(cls, message, needed_vars, kwargs):
-        import sys, getpass
+        import getpass
         print(message)
         for nv in needed_vars:
             vname = nv['name']
@@ -1875,7 +1892,7 @@ Content-Length: %d
                 kwargs[vname] = input((nv.get('comment') or vname) + ': ')
 
     @classmethod
-    def Main(cls, args=False):
+    def Main(cls, args=False):  # pylint: disable=invalid-name
         """Usage: rpckitten [--json|--raw|--tcp] <command> [<args ...>]
 
     Commands:
@@ -1899,7 +1916,6 @@ Content-Length: %d
         rpckitten help ping
         """
         if args is False:
-            import sys
             args = sys.argv[1:]
 
         if not args:
@@ -1910,7 +1926,7 @@ Content-Length: %d
 
         async def async_main(config, args):
             def _extract_bool_arg(args, *matches):
-                for i, a in enumerate(args):
+                for a in args:
                     if not a.startswith('-'):
                         break
                     if a in matches:
@@ -1979,15 +1995,14 @@ Content-Length: %d
                         return _print_result(result)
                     raise
 
-                for tries in (1, 2, 3):
+                for _tries in (1, 2, 3):
                     try:
                         result = await self.call(command, *args, **kwargs)
                         if inspect.isasyncgenfunction(result):
                             async for res in result():
                                 _print_result(res)
                             return
-                        else:
-                            return _print_result(result)
+                        return _print_result(result)
                     except cls.NeedInfoException as e:
                         cls._cli_collect_needed_info(str(e), e.needed_vars, kwargs)
 
@@ -1998,14 +2013,14 @@ Content-Length: %d
                 sys.stderr.write(
                     '%s: Not running: Start it first?\n' % self.name)
                 sys.exit(1)
+            except PermissionError as e:  # Note: order matters here!
+                _fail(5, e)
             except KeyError as e:
                 _fail(2, e)
             except ValueError as e:
                 _fail(3, e)
             except IOError as e:
                 _fail(4, e)
-            except PermissionError as e:
-                _fail(5, e)
             except RuntimeError as e:
                 _fail(6, e)
 
@@ -2021,4 +2036,3 @@ Content-Length: %d
 
         asyncio.set_event_loop_policy(None)
         asyncio.run(task)
-
