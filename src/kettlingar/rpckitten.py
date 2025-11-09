@@ -37,7 +37,6 @@ from .str_utils import str_args
 #
 # pylint: disable=too-many-lines
 # pylint: disable=too-many-locals
-# pylint: disable=too-many-returns
 # pylint: disable=too-many-branches
 # pylint: disable=too-many-arguments
 # pylint: disable=too-many-statements
@@ -94,6 +93,7 @@ class RequestInfo:
     via_unix_domain = property(lambda s: s.peer[0] == RPCKitten.PEER_UNIX_DOMAIN)
 
     def write(self, *data, writer=None):
+        """Write data directly to the underlying connection."""
         data = b''.join(
             (bytes(d, 'utf-8') if isinstance(d, str) else d) for d in data)
         (writer or self.writer).write(data)
@@ -175,9 +175,10 @@ class RPCKitten:
                   b'{"redirect": %s}\n')
 
     class NotRunning(OSError):
-        pass
+        """Exception raised if the service is not running."""
 
     class Configuration:
+        """Default RPC Kitten configuration class."""
         APP_NAME = 'kettlingar'
         APP_DATA_DIR = None
         APP_STATE_DIR = None
@@ -222,6 +223,7 @@ class RPCKitten:
             return '\n'.join(out.values())
 
         def as_dict(self):
+            """Current configuration represented as a dict."""
             results = {}
             for cls in self.__class__.__mro__:
                 for akey in cls.__dict__:
@@ -230,7 +232,8 @@ class RPCKitten:
                         results[akey] = getattr(self, akey, None)
             return results
 
-        def _default_config_file(self):
+        def default_config_file(self):
+            """Default configuration file location."""
             return os.path.join(self.app_data_dir, self.worker_name + '.cfg')
 
         def _set_defaults(self):
@@ -270,6 +273,7 @@ class RPCKitten:
             self.configure(file_config, strict=True, set_defaults=False)
 
         def configure(self, args=None, strict=True, set_defaults=True):
+            """Set defaults and parse arguments to generate a configuration."""
             consumed = set()
 
             if not args:
@@ -303,7 +307,7 @@ class RPCKitten:
                         if key == 'worker_config' and val:
                             if RPCKitten.Bool(val):
                                 self._configure_from_file(
-                                    self._default_config_file())
+                                    self.default_config_file())
                             else:
                                 self._configure_from_file(val)
 
@@ -316,16 +320,18 @@ class RPCKitten:
 
             if not consumed:
                 try:
-                    self._configure_from_file(self._default_config_file())
+                    self._configure_from_file(self.default_config_file())
                 except OSError:
                     pass
 
             return unconsumed
 
     class NeedInfoException(Exception):
+        """An exception requesting the user provide more information."""
         http_code = 423
 
         class Var(dict):
+            """A missing variable."""
             def __init__(self, varname,
                     vartype='text', default=None, comment=None):
                 super().__init__()
@@ -342,9 +348,12 @@ class RPCKitten:
                 ) for v in (needed_vars or [])]
 
     class RedirectException(Exception):
-        def __init__(self, t, *args, **kwargs):
+        """Raising this triggers an HTTP redirect."""
+        def __init__(self, target, *args, **kwargs):
             super().__init__(*args, **kwargs)
-            self.target = bytes(t, 'utf-8') if isinstance(t, str) else t
+            self.target = (bytes(target, 'utf-8')
+                if isinstance(target, str)
+                else target)
 
     def __init__(self, **kwargs):
         args = kwargs.pop('args', None)
@@ -738,6 +747,7 @@ class RPCKitten:
             # the request_obj target changes (response redirection).
             return req.write(*data, writer=writer)
 
+        # pylint: disable=protected-access
         sent = 0
         fds_ok = False
         method = path = _version = peer = sent = ''
@@ -996,9 +1006,9 @@ class RPCKitten:
             elif ctype == 'application/x-www-form-urlencoded':
                 body = str(request_obj.body, 'utf-8').strip()
                 kwargs = urllib.parse.parse_qs(body)
-                for k in kwargs.keys():
-                    if len(kwargs[k]) == 1:
-                        kwargs[k] = kwargs[k][0]
+                for k, v in kwargs.items():
+                    if len(v) == 1:
+                        kwargs[k] = v[0]
                 args = kwargs.pop('_args', [])
             else:
                 self.warning('Unhandled POST MIME type: %s' % ctype)
@@ -1199,7 +1209,7 @@ class RPCKitten:
         try:
             return msgpack.packb(data, default=_to_exttype)
         except Exception as exc:
-            raise ValueError('to_msgpack failed: %s' % (exc,))
+            raise ValueError('to_msgpack failed: %s' % (exc,)) from exc
 
     def from_msgpack(self, d, ext_hook=None):
         """
@@ -1220,6 +1230,7 @@ class RPCKitten:
         return msgpack.unpackb(d, ext_hook=_from_exttype)
 
     async def _url_connect(self, url, allow_unix=True):
+        # pylint: disable=protected-access
         _proto, _, host_port, path = url.split('/', 3)
 
         allow_unix &= bool(self._peeraddr or not self.config.worker_use_tcp)
@@ -1239,6 +1250,7 @@ class RPCKitten:
         return ('/' + path), False, rd_wr
 
     async def _send_data_and_fds(self, writer, data, fds):
+        # pylint: disable=protected-access
         try:
             sock = writer._transport._sock
             sock.setblocking(1) # Won't block for long...
@@ -1253,6 +1265,7 @@ class RPCKitten:
         return 0
 
     async def _recv_data_and_fds(self, reader, bufsize=64*1024, fds=False):
+        # pylint: disable=protected-access
         sock = reader._transport._sock
         if fds and (sock.family == socket.AF_UNIX):
             try:
@@ -1480,6 +1493,8 @@ Content-Length: %d
         return None, buffer
 
     def _chunk_decoder(self, reader, hdrs, buffer, rfds):
+        # pylint: disable=unnecessary-lambda-assignment
+
         ctype = hdrs['Content-Type']
         if ctype == 'application/x-msgpack':
             decode = self.from_msgpack
@@ -1558,8 +1573,10 @@ Content-Length: %d
     def _wrap_async_generator(self, api_method):
         # Use chunked encoding or text/event-stream to send multiple results
         class RemoteError(Exception):
+            """Exception raised in service process."""
             http_code = 500
         async def raw_method(request_obj, *args, **kwargs):
+            # pylint: disable=unnecessary-lambda-assignment
             enc = request_obj.encoder
             resp_mimetype = request_obj.mimetype
             events = False
@@ -1715,7 +1732,7 @@ Content-Length: %d
             setattr(self.config, reset.lower(), default)
             results['reset'] = await call_config_hook(reset)
 
-        if 1 < sum([(1 if a else 0) for a in (val, append, remove, pop)]):
+        if 1 < sum((1 if a else 0) for a in (val, append, remove, pop)):
             raise ValueError('Please only perform one operation at a time!')
 
         if key:
@@ -1737,7 +1754,7 @@ Content-Length: %d
 
         if save and await call_config_hook(save):
             if self.Bool(save):
-                filepath = self.config._default_config_file()
+                filepath = self.config.default_config_file()
             else:
                 filepath = save
             with open(filepath, 'w', encoding='utf-8') as fd:
@@ -1862,11 +1879,13 @@ Content-Length: %d
 
     @classmethod
     def TextFormat(cls, result):  # pylint: disable=invalid-name
+        """Default text formatting method."""
         if isinstance(result, dict) and '_format' in result:
             return result.pop('_format')
         return '%s'
 
     def print_result(self, result, print_raw=False, print_json=False):
+        """Print results as text."""
         if print_raw:
             print('%s' % result)
         elif print_json:
@@ -1939,6 +1958,7 @@ Content-Length: %d
             no_unix = _extract_bool_arg(args, '-t', '--tcp')
             no_msgpack = _extract_bool_arg(args, '-J', '--json-rpc')
 
+            # pylint: disable=protected-access
             self = cls(config=config)
             name = '%s/%s' % (config.app_name, self.name)
             command = args.pop(0)
