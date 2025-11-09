@@ -1,12 +1,22 @@
+"""
+Demonstrate how to use FileCat, sending and receiving file descriptors. 
+"""
 import asyncio
-import os
 import tempfile
 import sys
 
 from .filecat import FileCat
 
 
+# pylint: disable=broad-exception-caught
+
+
 async def test_function():
+    """
+    Test all the things!
+    """
+    # pylint: disable=no-member
+
     kitty = await FileCat(args=sys.argv[1:]).connect(auto_start=True)
     print('%s' % kitty)
 
@@ -40,5 +50,6 @@ async def test_function():
         print('Failed: %s' % e)
 
     await kitty.quitquitquit()
+
 
 asyncio.run(test_function())

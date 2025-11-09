@@ -26,6 +26,7 @@ version = {attr = "kettlingar.__version__.__version__"}
 disable = [
     "C0209",  # Consider using f-string
     'R0801',  # Similar lines in multiple files
+    'R0903',  # Too few public methods
 ]
 
 [project.optional-dependencies]

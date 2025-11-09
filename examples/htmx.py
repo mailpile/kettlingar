@@ -1,6 +1,7 @@
-# This is a sample kitten which shows how to serve and interact with an
-# web page using the HTMX framework.
-#
+"""
+This is a sample kitten which shows how to serve and interact with an
+web page using the HTMX framework.
+"""
 import asyncio
 
 from .kitten import MyKitten
@@ -55,9 +56,10 @@ class HtmxKitten(MyKitten):
     how to use HTMX kettlingar as a back-end for HTMX pages.
     """
     class Configuration(MyKitten.Configuration):
+        """MyKitten configuration"""
         WORKER_NAME = 'HTMXKitten'
 
-    async def public_api_web_root(self, request_info):
+    async def public_api_web_root(self, _request_info):
         """/
 
         A public landing page.
@@ -67,7 +69,7 @@ class HtmxKitten(MyKitten):
         """
         return 'text/html', SINGLE_PAGE_APP % {'secret': self.api_secret}
 
-    async def api_events(self, request_info, count=10):
+    async def api_events(self, _request_info, count=10):
         """/events
 
         This is a Server Sent Events endpoint which will send a few events

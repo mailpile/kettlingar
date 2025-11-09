@@ -1,3 +1,6 @@
+"""
+MyKitten example microservice.
+"""
 import asyncio
 import random
 
@@ -6,7 +9,10 @@ from kettlingar.metrics import RPCKittenVarz
 
 
 class ExtraMethods:
-    async def api_stretch(self, request_info):
+    """
+    Class which defines extra API methods, to demonstrate lazy-loading.
+    """
+    async def api_stretch(self, _request_info):
         """/stretch
 
         Have a nice stretch.
@@ -21,18 +27,19 @@ class MyKitten(RPCKitten, RPCKittenVarz):
     private and requires authentication, and may go on for a while.
     """
     class Configuration(RPCKitten.Configuration):
+        """MyKitten Configuration"""
         APP_NAME = 'mykitten'
         WORKER_NAME = 'Kitty'
         SLEEP_TIME = 1
 
-    async def public_api_web_root(self, request_info):
+    async def public_api_web_root(self, _request_info):
         """/
 
         Serve up a placeholder at the root of the web server.
         """
         return 'text/html', '<html><body><h1>Hello Kitty World!</h1></body></html>'
 
-    async def public_api_meow(self, request_info):
+    async def public_api_meow(self, _request_info):
         """/meow
 
         This endpoint requires no authentication!
@@ -45,7 +52,7 @@ class MyKitten(RPCKitten, RPCKittenVarz):
             'text/plain',           # Fixed MIME type of `text/plain`
             'Meow world, meow!\n')  # Meow!
 
-    async def public_api_slow_meow(self, request_info, delay:float=None):
+    async def public_api_slow_meow(self, _request_info, delay:float=None):
         """/slow_meow
 
         Same as above, but with a random delay before responding.
@@ -55,7 +62,7 @@ class MyKitten(RPCKitten, RPCKittenVarz):
         await asyncio.sleep(delay)
         return ('text/plain', 'Meow world, meow after %.2fs!\n' % delay)
 
-    async def api_purr(self, request_info,
+    async def api_purr(self, _request_info,
             count:int=1,
             purr:str='purr',
             caps:bool=False):
@@ -81,23 +88,24 @@ class MyKitten(RPCKitten, RPCKittenVarz):
                 result)                  # Result object
             await asyncio.sleep(self.config.sleep_time)
 
-    async def api_both(self, request_info):
+    async def api_both(self, _request_info):
         """/both
 
         Meow and purr. This demonstrates API methods invoking each-other.
         """
+        # pylint: disable=no-member
         yield None, await self.meow()
         async for purr in self.purr(1):
             yield None, purr
 
-    async def api_freakout(self, request_info):
+    async def api_freakout(self, _request_info):
         """/freakout
 
         Raise an exception.
         """
         raise ValueError('Nothing is good enough for me!')
 
-    def get_default_methods(self, request_info):
+    def get_default_methods(self, _request_info):
         """/*
 
         Respond to any otherwise unrecognized request with a meow.
@@ -109,6 +117,7 @@ class MyKitten(RPCKitten, RPCKittenVarz):
 
         Dynamically create a `mrow` method during initialization.
         """
+        # pylint: disable=attribute-defined-outside-init
         self.api_mrow = self.api_both
         self.expose_methods(ExtraMethods())
         return servers

@@ -1,21 +1,24 @@
+"""
+Test basic RPC Kitten functionality, sync style.
+"""
 import os
 import sys
 import tempfile
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
+# pylint: disable=wrong-import-position disable=import-error
 from examples.kitten import MyKitten
+
 
 OUTPUT = []
 my_print = OUTPUT.append
 
 
-
-def call_slow_meow(kitty, which, delay):
-    my_print("%s: %s" % (which, kitty.slow_meow(delay=delay)))
-
-
 def full_test_function(*args):
+    """
+    Instanciate, connect to, test and shut down examples.MyKitten.
+    """
     try:
         testdir = tempfile.mkdtemp(suffix='rpckittens')
 
@@ -33,9 +36,9 @@ def full_test_function(*args):
 
         # Make sure ping before connect fails
         try:
-             assert not kitty.ping()
+            assert not kitty.ping()
         except kitty.NotRunning:
-             pass
+            pass
 
         # Connect!
         if loopback:
@@ -75,7 +78,9 @@ def full_test_function(*args):
 
 
 def test_kitten():
+    """Test kitten running in separate process"""
     full_test_function()
 
 def test_kitten_loopback():
+    """Test kitten as a module within this process"""
     full_test_function('--loopback')

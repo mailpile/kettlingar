@@ -1,3 +1,6 @@
+"""
+Demonstrate how to start/stop/interact with MyKitten
+"""
 import asyncio
 import sys
 
@@ -5,10 +8,16 @@ from .kitten import MyKitten
 
 
 async def call_slow_meow(kitty, which):
+    """A task which slowly meows"""
     print("%s: %s" % (which, await kitty.slow_meow()))
 
 
 async def test_function():
+    """
+    Test all the things!
+    """
+    # pylint: disable=no-member
+
     args = sys.argv[1:]
     loopback = '--loopback' in args
     if loopback:

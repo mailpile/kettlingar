@@ -80,12 +80,12 @@ class MyKitten(RPCKitten):
         APP_NAME = 'mykitten'
         WORKER_NAME = 'Kitty'
 
-    async def public_api_meow(self, request_info):
+    async def public_api_meow(self, _request_info):
         return (
             'text/plain',           # Fixed MIME type of `text/plain`
             'Meow world, meow!\n')  # Meow!
 
-    async def api_purr(self, request_info, count:int=1, purr:str='purr'):
+    async def api_purr(self, _request_info, count:int=1, purr:str='purr'):
         _format = self.config.worker_name + ' says %(purr)s'
 
         for i in range(count):
@@ -160,11 +160,11 @@ an API endpoint is simply a Python function named using one of the following pre
 to understand the difference between them, see **Access controls** below.
 
 These functions must always take at least one positional argument
-(`request_info`),
+(`_request_info`),
 and must either return a single tuple of `(mime-type, data)`,
 or implement a generator which yields such tuples.
 
-Arguments after `request_info` (both positional and keyword arguments) are part of the exposed API.
+Arguments after `_request_info` (both positional and keyword arguments) are part of the exposed API.
 If the arguments have type hints,
 `kettlingar` will automatically convert/validate incoming data accordingly.
 
@@ -366,10 +366,19 @@ source venv/bin/activate  # On Windows, use `venv\Scripts\activate`
 pip install -e ".[dev]"
 ```
 
-## Running Tests
+## Running Tests and Linting
+
+Before opening any pull requests, please ensure tests pass:
 
 ```bash
 pytest tests
+```
+
+... and you haven't made the linter unhappy:
+
+
+```bash
+pylint src tests examples
 ```
 
 

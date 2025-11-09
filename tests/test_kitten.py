@@ -1,3 +1,6 @@
+"""
+Test basic RPC Kitten functionality, async style.
+"""
 import asyncio
 import os
 import sys
@@ -5,18 +8,23 @@ import tempfile
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
+# pylint: disable=wrong-import-position disable=import-error
 from examples.kitten import MyKitten
+
 
 OUTPUT = []
 my_print = OUTPUT.append
 
 
-
 async def call_slow_meow(kitty, which, delay):
+    """Async task wrapper for calling kitty.slow_meow"""
     my_print("%s: %s" % (which, await kitty.slow_meow(delay=delay)))
 
 
 async def full_test_function(*args):
+    """
+    Instanciate, connect to, test and shut down examples.MyKitten.
+    """
     try:
         testdir = tempfile.mkdtemp(suffix='rpckittens')
 
@@ -34,9 +42,9 @@ async def full_test_function(*args):
 
         # Make sure ping before connect fails
         try:
-             assert not await kitty.ping()
+            assert not await kitty.ping()
         except kitty.NotRunning:
-             pass
+            pass
 
         # Connect!
         if loopback:
@@ -89,7 +97,9 @@ async def full_test_function(*args):
 
 
 def test_kitten():
+    """Test kitten running in separate process"""
     asyncio.run(full_test_function())
 
 def test_kitten_loopback():
+    """Test kitten as a module within this process"""
     asyncio.run(full_test_function('--loopback'))
