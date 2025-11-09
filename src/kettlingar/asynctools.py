@@ -1,3 +1,6 @@
+"""
+Helper functions and classs for working with async code.
+"""
 import asyncio
 import logging
 import socket
@@ -5,9 +8,33 @@ import time
 import traceback
 
 
+# Pylint doesn't like our lazy-loading, generic exception handling and
+# overall low-level meddling.  But these are core features of what we
+# are doing here, so...
+#
+# pylint: disable=import-outside-toplevel
+# pylint: disable=broad-exception-caught
+# pylint: disable=bare-except
+# pylint: disable=too-many-arguments
+# pylint: disable=protected-access
+
+
 class SyncProxy:
+    """
+    SyncProxy provides a synchronous interface to an object with async
+    methods.
+
+    This is done by running an asyncio event loop in a dedicated thread,
+    and posting requests and receiving replies using a queue. So there is
+    some overhead, but it works quite well.
+
+    Exceptions thrown on the async side are caught and passed over the
+    queue, and re-raised there.
+    """
     def __init__(self, async_object):
-        import queue, threading
+        import threading
+        import queue
+
         self._obj = async_object
         self._wrapped = {}
         self._keep_running = True
@@ -39,12 +66,13 @@ class SyncProxy:
         if (isinstance(result, tuple) and len(result)
                 and result[0] is self._EXCEPTION_MARKER):
             raise result[1]
-        elif result is self._obj:
+        if result is self._obj:
             return self
         return result
 
     def _wrap(self, async_method):
-        import inspect, queue
+        import inspect
+        import queue
 
         if inspect.isasyncgenfunction(async_method):
             def wrapper(*args, **kwargs):
@@ -77,41 +105,58 @@ class SyncProxy:
 
 
 class FileWriter:
+    """
+    Emulate the interface of an asyncio writer, but for a file descriptor.
+    """
     def __init__(self, fd):
         self.fd = fd
 
     def write(self, data):
+        """Write data to the file descriptor."""
         return self.fd.write(data)
 
     async def drain(self):
-        pass
+        """A no-op, for compatibility with asyncio Writer objects."""
 
     def close(self):
+        """Close the file descriptor."""
         self.fd.close()
 
 
 def log_exceptions(func):
+    """
+    Decorator/function wrapper to log thrown exceptions and re-raise.
+    """
     def wrap_func(*args, **kwargs):
         try:
             return func(*args, **kwargs)
         except:
-            logging.exception('Exception in wrapped func: %s' % func)
+            logging.exception('Exception in wrapped func: %s', func)
             raise
     return wrap_func
 
 
 def create_background_task(task):
+    """
+    Create and schedule an async background task.
+    """
     async def wrap_task():
         try:
             await task
         except asyncio.exceptions.CancelledError:
             pass
         except:
+            # FIXME: This should probably be a logger?
             traceback.print_exc()
     return asyncio.get_running_loop().create_task(wrap_task())
 
 
 async def copy_from_queue(q, w, logger):
+    """
+    A generic asyncio task for copying data from a queue directly
+    into a writer. A null/false object in the queue will indicate
+    end-of-file and trigger shutdown of the socket being written to.
+    """
     try:
         while True:
             data = await q.get()
@@ -130,10 +175,14 @@ async def copy_from_queue(q, w, logger):
             pass
 
 
-async def copy_loop(r, w, nbytes, logger):
+async def copy_loop(r, w, chunk_size, logger):
+    """
+    A generic asyncio task for copying data from a reader directly
+    into a writer.
+    """
     try:
         while True:
-            data = await r.read(nbytes)
+            data = await r.read(chunk_size)
             if not data:
                 return
             w.write(data)
@@ -150,6 +199,15 @@ async def copy_loop(r, w, nbytes, logger):
 
 
 async def gather_and_close(done_cb, done_args, tasks, *conns):
+    """
+    A generic asyncio task for waiting until a bunch of tasks have
+    completed, and then shutting down/closing a bunch of connections
+    or file descriptors.
+
+    The `done_cb` function will be called upon completion with the
+    given arguments. If an exception was raised, the exception object
+    will be passed as well like so: `done_cb(*done_args, exception=e)`.
+    """
     try:
         await asyncio.gather(*tasks)
         for conn in conns:
