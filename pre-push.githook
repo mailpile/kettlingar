@@ -1,0 +1,16 @@
+#!/bin/sh
+#
+# Client-side git hook to prevent pushing if tests fail or linter is angry.
+#
+# Install this like so:
+#
+#     cd .git/hooks
+#     ln -s ../../pre-push.githook pre-push
+#
+
+pytest tests || exit 1
+
+echo ========== Running pylint ==========
+pylint --disable=fixme tests examples src || exit 1
+
+exit 0

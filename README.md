@@ -381,6 +381,10 @@ pytest tests
 pylint src tests examples
 ```
 
+See also
+[pre-push.githook](pre-push.githook)
+for client-side automation to prevent pushing code that breaks tests or fails the linter.
+
 
 # Contributing
 
