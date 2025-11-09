@@ -16,8 +16,6 @@ async def test_function():
     """
     Test all the things!
     """
-    # pylint: disable=no-member
-
     args = sys.argv[1:]
     loopback = '--loopback' in args
     if loopback:

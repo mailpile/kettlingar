@@ -101,8 +101,6 @@ class RPCKittenVarz:
         Return the current internal metrics.
         """
         varz = {}
-
-        # pylint: disable=no-member
         if hasattr(self, 'start_time'):
             self.metrics_gauge('start_time', self.start_time)
 

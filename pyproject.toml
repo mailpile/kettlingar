@@ -25,9 +25,11 @@ version = {attr = "kettlingar.__version__.__version__"}
 [tool.pylint]
 disable = [
     "C0209",  # Consider using f-string
+    "C0325",  # Unnecessary parens
+    "C0415",  # Import outside toplevel
     'R0801',  # Similar lines in multiple files
     'R0903',  # Too few public methods
-    "C0325",  # Unnecessary parens ... clarity is not a bug.
+    "E1101",  # Instance of ... has no ... member
 ]
 
 [project.optional-dependencies]

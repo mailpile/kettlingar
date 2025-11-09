@@ -12,7 +12,6 @@ import traceback
 # overall low-level meddling.  But these are core features of what we
 # are doing here, so...
 #
-# pylint: disable=import-outside-toplevel
 # pylint: disable=broad-exception-caught
 # pylint: disable=bare-except
 # pylint: disable=too-many-arguments

@@ -15,8 +15,6 @@ async def test_function():
     """
     Test all the things!
     """
-    # pylint: disable=no-member
-
     kitty = await FileCat(args=sys.argv[1:]).connect(auto_start=True)
     print('%s' % kitty)
 

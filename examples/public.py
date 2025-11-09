@@ -10,7 +10,6 @@ from kettlingar import RPCKitten
 
 # Lazy-loading bothers pylint...
 #
-# pylint: disable=import-outside-toplevel
 # pylint: disable=import-error
 
 

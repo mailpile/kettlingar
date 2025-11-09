@@ -1,9 +1,17 @@
+"""
+Mix-in for RPCKittens that also serve a "normal" website.
+"""
 import datetime
 import inspect
 import os
 
 
 class WebKitten:
+    """
+    A mix-in class for RPCKittens that want to also expose a normal public
+    website (including static and jinja2 templated content) using the same
+    server as serves the API.
+    """
     STATIC_MIMETYPES = {
         'COPYING': 'text/plain',
         'README':  'text/plain',
@@ -17,44 +25,51 @@ class WebKitten:
         '.txt':    'text/plain',
     }
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *_args, **_kwargs):
+        self.package = None
         self.prefix = None
+        self.static_loader = None
+        self.jinja = None
         self.routes = {
             'GET': {
                  # PATH: (public?, template, func, title),
             }}
 
         # Monkey patch in our route handling, with fallback
+        # pylint: disable=access-member-before-definition
         self.rpc_default_methods = self.get_default_methods
         self.get_default_methods = self.web_default_methods
 
     async def init_webkitten(self, package, prefix, routes):
+        """Initialize and configure the web server."""
+        # FIXME: document what those arguments are!
         import locale
         locale.setlocale(locale.LC_TIME, "C")
 
         self.package = package
         self.prefix = prefix
-        self.static_loader = None
-        self.jinja = None
 
         for method in routes:
             if method not in self.routes:
                 self.routes[method] = {}
             self.routes[method].update(routes[method])
 
-    def common_jinja_vars(self, request_info):
-        """
-        """
+    def common_jinja_vars(self, _request_info):
+        """Common Jinja variables. Subclasses override."""
         return {}
 
-    def web_default_methods(self, request_info):
-        if request_info.path.startswith('/static'):
+    def web_default_methods(self, _request_info):
+        """Default methods for web-kittens.
+
+        Sets up handlers for the /static and `self.prefix` web paths.
+        """
+        if _request_info.path.startswith('/static'):
             return (self._web_static, None)
 
-        if self.prefix and request_info.path.startswith(self.prefix):
+        if self.prefix and _request_info.path.startswith(self.prefix):
             return (self._web_handle, None)
 
-        return self.rpc_default_methods(request_info)
+        return self.rpc_default_methods(_request_info)
 
     def _jinja(self):
         if self.jinja is None:
@@ -96,19 +111,19 @@ class WebKitten:
 
             if inspect.isasyncgenfunction(func):
                 variables['results'] = results = []
-                async for mimetype, result in func(req, *args):
+                async for _mimetype, result in func(req, *args):
                     results.append(result)
             else:
                 variables.update((await func(req, *args))[1])
 
             return 'text/html', await template.render_async(variables)
-        except Exception as e:
+        except:
             self.exception('Error handling %s' % req.path)
             raise
 
-    async def _web_static(self, request_info):
-        resource = request_info.path[8:]
-        if '/.' in request_info.path or not resource:
+    async def _web_static(self, _request_info):
+        resource = _request_info.path[8:]
+        if '/.' in _request_info.path or not resource:
             raise PermissionError('Invalid path')
 
         mimetype = (
@@ -151,15 +166,24 @@ class WebKitten:
                 rpath, arg = rpath.rsplit('/', 1)
                 args[:0] = [arg]
             except ValueError:
+                # pylint: disable=raise-missing-from
                 raise KeyError('Route not found: "%s %s"' % (method, path))
 
 
 class WebKittenWithHelp(WebKitten):
+    """
+    A mix-in class for RPC Kittens which serves up help for the API methods
+    as a human readable website.
+
+    FIXME: This doesn't work yet!
+    """
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.routes['GET']['/help'] = (
             False, 'help.jinja', self.web_help, 'Help')
 
-    async def web_help(self, request_info, *args, **kwargs):
-        mt, result = await self.api_help(request_info, *args, **kwargs)
+    async def web_help(self, _request_info, *args, **kwargs):
+        """Provide help."""
+        # FIXME: This needs more work!
+        mt, result = await self.api_help(_request_info, *args, **kwargs)
         return mt, {'text': result}
