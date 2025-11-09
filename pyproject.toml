@@ -27,6 +27,7 @@ disable = [
     "C0209",  # Consider using f-string
     'R0801',  # Similar lines in multiple files
     'R0903',  # Too few public methods
+    "C0325",  # Unnecessary parens ... clarity is not a bug.
 ]
 
 [project.optional-dependencies]

@@ -7,9 +7,9 @@ two use cases:
 
   * split a complex application into multiple cooperating processes
   * control, inspect and manage simple Python background services
+
 """
 from .rpckitten import RPCKitten
 from .__version__ import __version__
 
 __all__ = ['RPCKitten']
-

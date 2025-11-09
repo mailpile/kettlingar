@@ -1,3 +1,7 @@
+"""
+Collect and expose Prometheus-compatible metrics within a running
+RPCKitten microservice.
+"""
 import random
 
 
@@ -48,6 +52,8 @@ class RPCKittenVarz:
         stats[key] = stats.get(key, 0) + cnt
         stats[self.METRICS_TYPE_MAP][key] = self.METRICS_COUNT
 
+    # pylint: disable=too-many-arguments
+    # pylint: disable=too-many-positional-arguments
     def metrics_sample(self, key, val,
             max_samples=None,
             prune=METRICS_PRUNE_RANDOM,
@@ -95,13 +101,16 @@ class RPCKittenVarz:
         Return the current internal metrics.
         """
         varz = {}
-        if self.start_time:
+
+        # pylint: disable=no-member
+        if hasattr(self, 'start_time'):
             self.metrics_gauge('start_time', self.start_time)
+
         varz.update(self.stats_public)
 
         if request_info.authed:
             varz.update(self.stats_private)
             varz[self.METRICS_TYPE_MAP].update(
                 self.stats_public[self.METRICS_TYPE_MAP])
-        return None, varz
 
+        return None, varz
