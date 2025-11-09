@@ -81,6 +81,10 @@ def test_kitten():
     """Test kitten running in separate process"""
     full_test_function()
 
+def test_kitten_nounix():
+    """Test kitten with the unix domain socket disabled"""
+    full_test_function('--worker-use-unixdomain=n')
+
 def test_kitten_loopback():
     """Test kitten as a module within this process"""
     full_test_function('--loopback')

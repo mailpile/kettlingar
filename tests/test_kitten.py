@@ -91,14 +91,26 @@ async def full_test_function(*args):
         assert len(OUTPUT) == 10
         assert OUTPUT[9] == 'purr' * 10
 
+        # Ensure the input validation rejects elephants where we want ints
+        try:
+            async for result in kitty.purr('elephant'):
+                assert result == 'not reached'
+        except (RuntimeError, ValueError) as exc:
+            assert 'invalid literal' in str(exc)
+
     finally:
         await kitty.quitquitquit()
+        await asyncio.sleep(0.1)
         os.rmdir(testdir)
 
 
 def test_kitten():
     """Test kitten running in separate process"""
     asyncio.run(full_test_function())
+
+def test_kitten_nounix():
+    """Test kitten with the unix domain socket disabled"""
+    asyncio.run(full_test_function('--worker-use-unixdomain=n'))
 
 def test_kitten_loopback():
     """Test kitten as a module within this process"""
