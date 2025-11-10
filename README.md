@@ -313,9 +313,15 @@ Kitty says rarrrarr
 ```
 
 Note that if you expect to use your microservice from the command line,
-you will need to handle any type conversions (from string representations) yourself within the function.
-A future version of `kettlingar` might be able to infer conversions from Python type hints,
-but that hasn't yet been implemented.
+you will need to either handle any type conversions (from string representations) yourself within the function,
+or add type annotations to the arguments -
+`kettlingar` knows how to automatically convert basic types
+(ints, floats, bools, ...)
+from common string representations.
+For custom classes/types,
+if your class can be constructed from a single string argument,
+that should work as well,
+but beware that msgpack may also need help with the de/serialization.
 
 
 # Unix domain sockets and passing file descriptors
