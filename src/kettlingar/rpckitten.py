@@ -196,6 +196,7 @@ class RPCKitten:
         WORKER_URL_PATH = ''
         WORKER_USE_TCP = True
         WORKER_USE_UNIXDOMAIN = True
+        WORKER_USE_MSGPACK = True
         WORKER_LOG_LEVEL = 0  # 20 sets the default to info
 
         WORKER_HTTP_REQUEST_TIMEOUT1 = 1.0
@@ -1000,6 +1001,8 @@ class RPCKitten:
         if request_obj.method == 'POST':
             ctype = request_obj.headers['Content-Type']
             if ctype == 'application/x-msgpack':
+                if not (self.config.worker_use_msgpack and msgpack):
+                    raise ValueError('msgpack is unavailable')
                 request_obj.mimetype = mt = ctype
                 request_obj.encoder = enc = self.to_msgpack
                 body = request_obj.body = self.from_msgpack(request_obj.body)
@@ -1364,7 +1367,8 @@ class RPCKitten:
             raise self.NotRunning('Please .connect() first')
 
         use_json = (self.Bool(kwargs.pop(self.CALL_USE_JSON, False))
-            or (msgpack is None))
+            or (msgpack is None)
+            or (not self.config.worker_use_msgpack))
 
         reply_to = kwargs.pop(self.CALL_REPLY_TO, None)
         if reply_to:

@@ -110,7 +110,12 @@ def test_kitten():
 
 def test_kitten_nounix():
     """Test kitten with the unix domain socket disabled"""
-    asyncio.run(full_test_function('--worker-use-unixdomain=n'))
+    asyncio.run(full_test_function('--worker-use-unixdomain=No'))
+
+def test_kitten_nomsgpack():
+    """Test kitten with msgpack serialization disabled"""
+    asyncio.run(full_test_function('--worker-use-msgpack=False'))
+
 
 def test_kitten_loopback():
     """Test kitten as a module within this process"""
