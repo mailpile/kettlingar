@@ -939,6 +939,12 @@ class RPCKitten:
                 if v[:2] == '0b':
                     return int(v[2:], 2)
             return int(v)
+        if rule in (str, 'str'):
+            if isinstance(v, str):
+                return v
+            return str(v, 'utf-8')
+        if rule in (bytes, 'bytes') and isinstance(v, str):
+            return bytes(v, 'utf-8')
         return rule(v)
 
     def _apply_annotations(self, func, args, kwargs):
