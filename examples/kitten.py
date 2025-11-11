@@ -4,7 +4,9 @@ MyKitten example microservice.
 import asyncio
 import random
 
-from kettlingar import RPCKitten
+from base64 import b64decode
+
+from kettlingar import RPCKitten, HttpResult
 from kettlingar.metrics import RPCKittenVarz
 
 
@@ -17,7 +19,7 @@ class ExtraMethods:
 
         Have a nice stretch.
         """
-        return ('text/plain', 'Streeeeeeeetch!\n')
+        return HttpResult('text/plain', 'Streeeeeeeetch!\n')
 
 
 class MyKitten(RPCKitten, RPCKittenVarz):
@@ -26,6 +28,8 @@ class MyKitten(RPCKitten, RPCKittenVarz):
     This microservice knows how to meow and how to purr. Purring is
     private and requires authentication, and may go on for a while.
     """
+    GIF1x1 = b64decode(b'R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7')
+
     class Configuration(RPCKitten.Configuration):
         """MyKitten Configuration"""
         APP_NAME = 'mykitten'
@@ -37,7 +41,9 @@ class MyKitten(RPCKitten, RPCKittenVarz):
 
         Serve up a placeholder at the root of the web server.
         """
-        return 'text/html', '<html><body><h1>Hello Kitty World!</h1></body></html>'
+        return HttpResult(
+            'text/html',
+            '<html><body><h1>Hello Kitty World!</h1></body></html>')
 
     async def public_api_meow(self, _request_info):
         """/meow
@@ -48,7 +54,7 @@ class MyKitten(RPCKitten, RPCKittenVarz):
         rendered directly or embedded in a {"mimetype":..., "data": ...}
         object when invoked as an RPC.
         """
-        return (
+        return HttpResult(
             'text/plain',           # Fixed MIME type of `text/plain`
             'Meow world, meow!\n')  # Meow!
 
@@ -60,7 +66,9 @@ class MyKitten(RPCKitten, RPCKittenVarz):
         if delay is None:
             delay = self.config.sleep_time * random.randint(0, 75) / 100.0
         await asyncio.sleep(delay)
-        return ('text/plain', 'Meow world, meow after %.2fs!\n' % delay)
+        return HttpResult(
+            'text/plain',
+            'Meow world, meow after %.2fs!\n' % delay)
 
     async def api_purr(self, _request_info,
             count:int=1,
@@ -76,16 +84,12 @@ class MyKitten(RPCKitten, RPCKittenVarz):
         be an async generator yielding results as they are received.
         """
         _format = self.config.worker_name + ' says %(purr)s'
+        if caps:
+            purr = purr.upper()
         for i in range(count):
-            result = {
+            yield {
                 'purr': purr * (i + 1),  # Purring!
                 '_format': _format}      # Formatting rule for CLI interface
-            if caps:
-                result['purr'] = result['purr'].upper()
-
-            yield (
-                None,                    # No MIME-type, let framework choose
-                result)                  # Result object
             await asyncio.sleep(self.config.sleep_time)
 
     async def api_both(self, _request_info):
@@ -94,9 +98,9 @@ class MyKitten(RPCKitten, RPCKittenVarz):
         Meow and purr. This demonstrates API methods invoking each-other.
         """
         # pylint: disable=no-member
-        yield None, await self.meow()
+        yield await self.meow().data
         async for purr in self.purr(1):
-            yield None, purr
+            yield purr
 
     async def api_freakout(self, _request_info):
         """/freakout
@@ -104,6 +108,13 @@ class MyKitten(RPCKitten, RPCKittenVarz):
         Raise an exception.
         """
         raise ValueError('Nothing is good enough for me!')
+
+    async def public_api_blank(self, _request_info):
+        """/blank
+
+        Return a 1x1 blank GIF image.
+        """
+        return HttpResult('image/gif', self.GIF1x1)
 
     def get_default_methods(self, _request_info):
         """/*

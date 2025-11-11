@@ -4,7 +4,7 @@ web page using the HTMX framework.
 """
 import asyncio
 
-from .kitten import MyKitten
+from .kitten import MyKitten, HttpResult
 
 
 SINGLE_PAGE_APP = """\
@@ -67,7 +67,9 @@ class HtmxKitten(MyKitten):
         This implementation leaks our secret and is horribly insecure as a
         result. Don't do this!
         """
-        return 'text/html', SINGLE_PAGE_APP % {'secret': self.api_secret}
+        return HttpResult(
+            'text/html',
+            SINGLE_PAGE_APP % {'secret': self.api_secret})
 
     async def api_events(self, _request_info, count=10):
         """/events
@@ -77,21 +79,22 @@ class HtmxKitten(MyKitten):
         """
         # Yielding the text/event-stream MIME-type tells kettlingar this
         # is a Server Sent Events endpoint.
-        yield 'text/event-stream', {'event': 'startup', 'data': 'Here we go!'}
+        yield self.sse_start_result(
+            {'event': 'startup', 'data': 'Here we go!'})
 
         # Send some hellos...
         for i in range(count):
             await asyncio.sleep(1)
-            yield None, {
+            yield {
                 'event': 'hello',
                 'data': 'Hello\nworld %d/%d ...' % (i+1, count)}
 
         # OK, that's enough!
         await asyncio.sleep(1)
-        yield None, {'event': 'hello', 'data': 'Goodbye\ncruel\nworld!\n\n'}
+        yield {'event': 'hello', 'data': 'Goodbye\ncruel\nworld!\n\n'}
 
         # Without this, the page will reconnect automatically.
-        yield None, {'event': 'eom', 'data': 'eom'}
+        yield {'event': 'eom', 'data': 'eom'}
 
 
 if __name__ == '__main__':

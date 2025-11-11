@@ -57,15 +57,21 @@ async def full_test_function(*args):
         assert pong['pong']
         assert pong.get('loopback', False) == loopback
 
-        # Test basic API functionality
+        # Test text HTTP responses
         meow = await kitty.meow()
         assert meow['mimetype'] == 'text/plain'
-        assert b'Meow' in meow['data']
+        assert 'Meow' in meow['data']
+
+        # Test binary HTTP responses
+        meow = await kitty.blank()
+        assert meow['mimetype'] == 'image/gif'
+        assert isinstance(meow['data'], bytes)
+        assert meow['data'].startswith(b'GIF89a')
 
         # Test: Ensure expose_methods(ExtraMethods()) did its job
         stretch = await kitty.stretch()
         assert stretch['mimetype'] == 'text/plain'
-        assert b'Streeee' in stretch['data']
+        assert 'Streeee' in stretch['data']
 
         # Send overlapping requests.
         # This tests:
@@ -108,9 +114,11 @@ def test_kitten():
     """Test kitten running in separate process"""
     asyncio.run(full_test_function())
 
+
 def test_kitten_nounix():
     """Test kitten with the unix domain socket disabled"""
     asyncio.run(full_test_function('--worker-use-unixdomain=No'))
+
 
 def test_kitten_nomsgpack():
     """Test kitten with msgpack serialization disabled"""

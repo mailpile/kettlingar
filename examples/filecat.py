@@ -1,7 +1,7 @@
 """
 Demonstrate services which receive or send open file descriptors.
 """
-from kettlingar import RPCKitten
+from kettlingar import RPCKitten, HttpResult
 
 
 class FileCat(RPCKitten):
@@ -17,14 +17,14 @@ class FileCat(RPCKitten):
 
         Returns the output read from an open file descriptor.
         """
-        return None, fd.read()
+        return fd.read()
 
     async def api_read(self, _request_info, path):
         """/read <path>
 
         Returns a file descriptor opened for reading.
         """
-        return self.FDS_MIMETYPE, open(path, 'rb')
+        return self.fds_result(open(path, 'rb'))
 
 
 if __name__ == '__main__':

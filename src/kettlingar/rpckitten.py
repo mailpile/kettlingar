@@ -54,6 +54,34 @@ def _mkdirp(path, mode):
         os.mkdir(path, mode)
 
 
+class HttpResult(dict):
+    """An HTTP result consists of an explicit MIME-type and some data."""
+    http_code = property(lambda s: s.get('http_code', 200))
+    http_redirect_to = property(lambda s: s.get('http_redirect_to'))
+
+    mimetype = property(lambda s: s['mimetype'])
+    data = property(lambda s: s['data'])
+
+    def __init__(self, mimetype, data, redirect_to=None):
+        self['mimetype'] = mimetype
+        self['data'] = data
+        if redirect_to:
+            self['http_redirect_to'] = redirect_to
+            self['http_code'] = 302
+        if mimetype:
+            if mimetype[:5] == 'text/':
+                if isinstance(data, (bytes, bytearray)):
+                    self['data'] = str(data, 'utf-8')
+            else:
+                if isinstance(data, str):
+                    self['data'] = bytes(data, 'utf-8')
+                elif isinstance(data, bytearray):
+                    self['data'] = bytes(data)
+
+    def __str__(self):
+        return '%s' % self.data
+
+
 class RequestInfo:
     """
     Class describing a specific request.
@@ -120,6 +148,7 @@ class RPCKitten:
     _MAGIC_SOCK = '_SO_BRE_MAGIC_'
 
     FDS_MIMETYPE = 'application/x-fd-magic'
+    SSE_MIMETYPE = 'text/event-stream'
     REPLY_TO_FIRST_FD = 'reply_to_first_fd'
     PEER_UNIX_DOMAIN = 'unix-domain'
 
@@ -464,17 +493,13 @@ class RPCKitten:
                     args = list(args)
                     self._apply_annotations(api_method, args, kwargs)
                 async for result in api_method(None, *args, **kwargs):
-                    yield result[1]
+                    yield result
         else:
             async def _func(*args, **kwargs):
                 if api_method.__annotations__:
                     args = list(args)
                     self._apply_annotations(api_method, args, kwargs)
-                ctype, data = await api_method(None, *args, **kwargs)
-                if ctype is None:
-                    return data
-                data = bytearray(data, 'utf-8') if isinstance(data, str) else data
-                return {'mimetype': ctype, 'data': data}
+                return await api_method(None, *args, **kwargs)
         return _func
 
     def _mk_rcfunc(self, fname, is_generator=False, **_kwa):
@@ -644,6 +669,18 @@ class RPCKitten:
         """
         return self.logger(1, fmt, *args)
 
+    def sse_start_result(self, data):
+        """
+        Helper to generate the first packet of a server-sent-events stream.
+        """
+        return HttpResult(self.SSE_MIMETYPE, data)
+
+    def fds_result(self, data):
+        """
+        Helper to generate a file-descriptor result.
+        """
+        return HttpResult(self.FDS_MIMETYPE, data)
+
     def _setup_service(self):
         logging.getLogger().setLevel(self.config.worker_log_level)
 
@@ -749,7 +786,6 @@ class RPCKitten:
             return req.write(*data, writer=writer)
 
         # pylint: disable=protected-access
-        sent = 0
         fds_ok = False
         method = path = _version = peer = sent = ''
         req.code = 500
@@ -798,7 +834,7 @@ class RPCKitten:
 
                 await self._send_data_and_fds(writer, http_res, fd_list)
                 req.sent += len(http_res)
-                sent += len(http_res)
+                sent = http_res
             else:
                 l1 = (self._HTTP_RESPONSE.get(req.code) or
                     (self._HTTP_RESPONSE_UNKNOWN % req.code))
@@ -1048,12 +1084,19 @@ class RPCKitten:
             return writer, 200, None, None
 
         try:
-            mimetype, resp = await api_method(request_obj, *args, **kwargs)
-            if not mimetype:
+            resp = await api_method(request_obj, *args, **kwargs)
+            if isinstance(resp, HttpResult):
+                code = resp.http_code
+                if (code == 302) and resp.redirect_to:
+                    raise RPCKitten.RedirectException(resp.redirect_to)
+                mimetype = resp.mimetype
+                resp = resp.data
+            else:
                 mimetype = request_obj.mimetype
                 resp = request_obj.encoder(resp)
+                code = 200
 
-            return writer, 200, _b(mimetype), resp
+            return writer, code, _b(mimetype), resp
         except RPCKitten.RedirectException:
             raise
         except RPCKitten.NeedInfoException:
@@ -1435,10 +1478,10 @@ Content-Length: %d
                         result = self.from_msgpack(body)
                     elif ctype == 'application/json':
                         result = self.from_json(body)
-                    elif ctype == 'text/event-stream':
+                    elif ctype == self.SSE_MIMETYPE:
                         result = self.from_server_sent_event(body)
                     else:
-                        result = {'mimetype': ctype, 'data': body}
+                        result = HttpResult(ctype, body)
                 if rfds:
                     result = [
                         self._fd_from_magic_arg(a, rfds)
@@ -1510,7 +1553,7 @@ Content-Length: %d
             decode = self.from_msgpack
         elif ctype == 'application/json':
             decode = self.from_json
-        elif ctype == 'text/event-stream':
+        elif ctype == self.SSE_MIMETYPE:
             decode = self.from_server_sent_event
         else:
             decode = lambda v: v
@@ -1592,14 +1635,21 @@ Content-Length: %d
             events = False
             first = True
             try:
-                async for m, r in api_method(request_obj, *args, **kwargs):
-                    mimetype, resp = m, r
+                async for r in api_method(request_obj, *args, **kwargs):
+                    if isinstance(r, HttpResult):
+                        if not first:
+                            raise RuntimeError(
+                                'HttpResult must be first emitted result')
+                        mimetype, resp = r.mimetype, r.data
+                    else:
+                        mimetype, resp = None, r
+
                     if resp is None and mimetype is None:
                         return
 
                     if mimetype and first:
                         resp_mimetype = mimetype
-                        if mimetype == 'text/event-stream':
+                        if mimetype == self.SSE_MIMETYPE:
                             events = enc = self.to_server_sent_event
                         else:
                             enc = lambda d: d  # Should already be encoded!

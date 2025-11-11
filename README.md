@@ -72,7 +72,7 @@ This is a kettlingar microservice named MyKitten:
 ```python
 import asyncio
 
-from kettlingar import RPCKitten
+from kettlingar import RPCKitten, HttpResult
 
 
 class MyKitten(RPCKitten):
@@ -81,21 +81,16 @@ class MyKitten(RPCKitten):
         WORKER_NAME = 'Kitty'
 
     async def public_api_meow(self, _request_info):
-        return (
+        return HttpResult(
             'text/plain',           # Fixed MIME type of `text/plain`
             'Meow world, meow!\n')  # Meow!
 
     async def api_purr(self, _request_info, count:int=1, purr:str='purr'):
         _format = self.config.worker_name + ' says %(purr)s'
-
         for i in range(count):
-            result = {
+            yield {
                 'purr': purr * (i + 1), # Purring!
                 '_format': _format}     # Formatting rule for CLI interface
-
-            yield (
-                None,                   # No MIME-type, let framework choose
-                result)                 # Result object
             await asyncio.sleep(1)
 
 
@@ -161,8 +156,9 @@ to understand the difference between them, see **Access controls** below.
 
 These functions must always take at least one positional argument
 (`_request_info`),
-and must either return a single tuple of `(mime-type, data)`,
-or implement a generator which yields such tuples.
+and must either return a result, or an `HttpResult(mimetype, data)`.
+Instead of returning a single value it is also supported to implement a generator which yields multiple results,
+(the first of which may be an `HttpResult`).
 
 Arguments after `_request_info` (both positional and keyword arguments) are part of the exposed API.
 If the arguments have type hints,
