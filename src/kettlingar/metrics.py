@@ -111,4 +111,4 @@ class RPCKittenVarz:
             varz[self.METRICS_TYPE_MAP].update(
                 self.stats_public[self.METRICS_TYPE_MAP])
 
-        return None, varz
+        return varz

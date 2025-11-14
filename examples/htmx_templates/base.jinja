@@ -1,7 +1,13 @@
 {% if not partial %}
-<!doctype html>
+<!DOCTYPE html>
 <html><head>
+  <meta charset="utf-8">
   <meta name="color-scheme" content="light dark" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <script src="{{ base_url }}/static/htmx-2.0.4.min.js"></script>
+  <script src="{{ base_url }}/static/htmx-sse-2.2.2.js"></script>
+  <link rel='stylesheet' href="{{ base_url }}/static/default.css">
 
   <title>
     {%- block title %}{{ title|default('Meow') }}{% endblock -%}

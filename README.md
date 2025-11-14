@@ -219,7 +219,15 @@ rather than a complete implementation.
 If you want to implement a public landing page at `/`
 (the root of the web server)
 you can do so by creating an API endpoint named `public_api_web_root`.
-The routing mechanism can be customzied by subclassing and overriding or extending
+
+If you want something a bit more simlar to a modern web framework -
+with an URL routing table,
+Jinja templating,
+and static resources,
+you can use the `WebKitten` mix-in as demonstrated in
+[examples/htmx.py](examples/htmx.py).
+
+For lower-level applications the routing mechanism can be customzied by subclassing and overriding or extending
 `RPCKitten.get_method_name(...)` and/or
 `RPCKitten.get_default_methods(...)`
 (see example in [examples/kitten.py](examples/kitten.py)).

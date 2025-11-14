@@ -62,12 +62,16 @@ class HttpResult(dict):
     mimetype = property(lambda s: s['mimetype'])
     data = property(lambda s: s['data'])
 
-    def __init__(self, mimetype, data, redirect_to=None):
+    def __init__(self, mimetype, data,
+            redirect_to=None,
+            http_code=None):
         self['mimetype'] = mimetype
         self['data'] = data
         if redirect_to:
             self['http_redirect_to'] = redirect_to
             self['http_code'] = 302
+        if http_code:
+            self['http_code'] = http_code
         if mimetype:
             if mimetype[:5] == 'text/':
                 if isinstance(data, (bytes, bytearray)):
@@ -787,7 +791,7 @@ class RPCKitten:
 
         # pylint: disable=protected-access
         fds_ok = False
-        method = path = _version = peer = sent = ''
+        req.peer = method = path = _version = peer = sent = ''
         req.code = 500
         try:
             head, hdrs, body, fds = await self._http11(reader, writer, fds=True)
@@ -922,6 +926,33 @@ class RPCKitten:
             return path[len(self._secret) + 1:]
         return path
 
+    def get_api_methods(self, request_obj):
+        """
+        Fetch the API methods matching the request. This implements our
+        default mapping of `/foo` HTTP paths to `public_api_foo` or `api_foo`.
+        Override with care!
+        """
+        method_name = self.get_method_name(request_obj)
+        if request_obj.authed:
+            raw_method = getattr(self, 'raw_' + method_name, None)
+            api_method = getattr(self, 'api_' + method_name, None)
+        else:
+            raw_method = api_method = None
+
+        if not raw_method and not api_method:
+            raw_method = getattr(self, 'public_raw_' + method_name, None)
+            api_method = getattr(self, 'public_api_' + method_name, None)
+
+        if not raw_method and not api_method:
+            # Note: This raises by default, but subclasses may override
+            #       and give us something to work with.
+            #
+            # pylint: disable=assignment-from-no-return
+            # pylint: disable=unpacking-non-sequence
+            api_method, raw_method = self.get_default_methods(request_obj)
+
+        return api_method, raw_method, [], {}
+
     def get_method_name(self, request_obj):
         """
         This function derives the basic method name (e.g. `ping`), from
@@ -1001,28 +1032,8 @@ class RPCKitten:
         def _b(v):
             return v if isinstance(v, bytes) else bytes(v, 'utf-8')
 
-        authed = request_obj.authed
         writer = request_obj.writer
-        method_name = self.get_method_name(request_obj)
-        has_annotations = None
-
-        if authed:
-            raw_method = getattr(self, 'raw_' + method_name, None)
-            api_method = getattr(self, 'api_' + method_name, None)
-        else:
-            raw_method = api_method = None
-
-        if not raw_method and not api_method:
-            raw_method = getattr(self, 'public_raw_' + method_name, None)
-            api_method = getattr(self, 'public_api_' + method_name, None)
-
-        if not raw_method and not api_method:
-            # Note: This raises by default, but subclasses may override
-            #       and give us something to work with.
-            #
-            # pylint: disable=assignment-from-no-return
-            # pylint: disable=unpacking-non-sequence
-            api_method, raw_method = self.get_default_methods(request_obj)
+        api_method, raw_method, args, kwargs = self.get_api_methods(request_obj)
 
         if raw_method:
             request_obj.handler = raw_method.__name__
@@ -1031,7 +1042,6 @@ class RPCKitten:
             request_obj.handler = api_method.__name__
             has_annotations = api_method if api_method.__annotations__ else None
 
-        args, kwargs = [], {}
         mt = request_obj.mimetype = 'application/json'
         enc = request_obj.encoder = self.to_json
         if request_obj.method == 'POST':
@@ -1103,7 +1113,7 @@ class RPCKitten:
             raise
         except Exception as e:
             import traceback
-            if authed:
+            if request_obj.authed:
                 return writer, 500, _b(mt), enc({
                     'error': str(e),
                     'traceback': traceback.format_exc()})
@@ -1278,6 +1288,8 @@ class RPCKitten:
                 return ext_hook(code, data)
             return msgpack.ExtType(code, data)
 
+        if not d:
+            return None
         d = d if isinstance(d, (bytes, bytearray)) else bytes(d, 'latin-1')
         return msgpack.unpackb(d, ext_hook=_from_exttype)
 
@@ -1736,7 +1748,7 @@ Content-Length: %d
 
             all_commands = self._all_commands()
             for _k, i in all_commands.items():
-                if kwa.get('docs'):
+                if self.Bool(kwa.get('docs')):
                     try:
                         i['help'] = i['api_method'].__doc__.rstrip()
                     except AttributeError:
@@ -1824,7 +1836,7 @@ Content-Length: %d
             'config': self.config.as_dict(),
             '_format': str(self.config).replace('%', '%%')})
 
-        return None, results
+        return results
 
     async def api_quitquitquit(self, _request_obj):
         """/quitquitquit
@@ -1836,7 +1848,7 @@ Content-Length: %d
         except:
             pass
         asyncio.get_running_loop().call_soon(self._real_shutdown)
-        return None, "Goodbye forever"
+        return "Goodbye forever"
 
     def get_docstring(self, method):
         """
@@ -1874,21 +1886,21 @@ Content-Length: %d
                 first = False
             main_doc = main_doc.replace('__API_COMMANDS__', '\n'.join(cmd_list))
 
-            return None, doc(self) +'\n'+ main_doc
+            return doc(self) +'\n'+ main_doc
 
         api_command = getattr(self, 'api_' + command, None)
         if not api_command:
             api_command = getattr(self, 'public_api_' + command, None)
         if api_command:
-            return None, doc(api_command)
+            return doc(api_command)
 
         raw_command = getattr(self, 'raw_' + command, None)
         if not raw_command:
             raw_command = getattr(self, 'public_raw_' + command, None)
         if raw_command:
-            return None, doc(raw_command)
+            return doc(raw_command)
 
-        return None, doc(None)
+        return doc(None)
 
     @classmethod
     def Bool(cls, value):  # pylint: disable=invalid-name

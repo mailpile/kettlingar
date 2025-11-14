@@ -1,0 +1,24 @@
+{% extends 'base.jinja' %}
+
+{% block title -%}{{ title }}{% endblock %}
+
+{% block content %}
+  <h1>{{ title }}</h1>
+
+  <p hx-get='{{ base_url }}/meow'>
+    Click me!
+  </p>
+
+  <form>
+    <button hx-post='{{ base_url }}/purr' hx-vals='{
+      "count": 3,
+      "purr": "{{ purr_sound }}"
+    }'>
+      Purring works, but is not incremental.
+    </button>
+  </form>
+
+  <p hx-ext="sse" sse-connect="{{ base_url }}/events" sse-swap="hello" sse-close="eom">
+    Server-sent events will appear here.
+  <p>
+{% endblock %}

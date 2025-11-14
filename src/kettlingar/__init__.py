@@ -9,7 +9,7 @@ two use cases:
   * control, inspect and manage simple Python background services
 
 """
-from .rpckitten import HttpResult, RPCKitten
+from .rpckitten import HttpResult, RequestInfo, RPCKitten
 from .__version__ import __version__
 
-__all__ = ['HttpResult', 'RPCKitten']
+__all__ = ['HttpResult', 'RequestInfo', 'RPCKitten']

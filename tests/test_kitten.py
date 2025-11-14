@@ -8,7 +8,10 @@ import tempfile
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
-# pylint: disable=wrong-import-position disable=import-error
+# pylint: disable=wrong-import-position
+# pylint: disable=import-error
+# pylint: disable=too-many-statements
+
 from examples.kitten import MyKitten
 
 

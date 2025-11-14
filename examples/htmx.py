@@ -4,72 +4,45 @@ web page using the HTMX framework.
 """
 import asyncio
 
-from .kitten import MyKitten, HttpResult
+from kettlingar import RPCKitten, HttpResult
+from kettlingar.webkitten import Route, WebKitten
 
 
-SINGLE_PAGE_APP = """\
-<!DOCTYPE html>
-<html><head>
+class HtmxKitten(RPCKitten, WebKitten):
+    """htmxkitten - A sample kettlingar Jinja/HTMX app
 
-  <title>Testing</title>
-
-  <script src="https://unpkg.com/htmx.org@2.0.4"
-    integrity="sha384-HGfztofotfshcF7+8n44JQL2oJmowVChPTg48S+jvZoztPfvwD79OC/LTtG6dMp+"
-    crossorigin="anonymous"></script>
-  <script src="https://unpkg.com/htmx-ext-sse@2.2.2"
-    integrity="sha384-fw+eTlCc7suMV/1w/7fr2/PmwElUIt5i82bi+qTiLXvjRXZ2/FkiTNA/w0MhXnGI"
-    crossorigin="anonymous"></script>
-
-</head><body>
-
-  <h1>HTMX Kitten Test</h1>
-
-  <p hx-get='/%(secret)s/meow'>
-    Click me!
-  </p>
-
-  <form>
-    <button hx-post='/%(secret)s/purr' hx-vals='{
-      "count": 3,
-      "purr": "woof"
-    }'>
-      Purring works, but is not incremental.
-    </button>
-  </form>
-
-  <p hx-ext="sse" sse-connect="/%(secret)s/events" sse-swap="hello" sse-close="eom">
-    Server-sent events will appear here.
-  <p>
-
-</body></html>
-"""
-
-
-class HtmxKitten(MyKitten):
-    """htmxkitten - A sample kettlingar HTMX app
-
-    Inheriting from MyKitten, this microservice knows how to meow and
-    how to purr. Purring is private and requires authentication, and
-    may go on for a while.
+    This microservice knows how to meow and how to purr. Purring is
+    private and requires authentication, andmay go on for a while.
 
     There is also a public HTMX document served at / to demonstrate
-    how to use HTMX kettlingar as a back-end for HTMX pages.
+    how to use HTMX kettlingar as a back-end for HTMX pages. There is
+    a demo of how to use Server Sent Events with HTMX as well.
+
+i   The HTMX document is rendered using Jinja, based on the templates
+    found in `examples/htmx_templates` and static resources in
+    `examples/htmx_static`.
     """
-    class Configuration(MyKitten.Configuration):
+    WEB_JINJA_LOADER_PACKAGE = 'examples.htmx'
+    WEB_STATIC_DIR = 'htmx_static'
+    WEB_JINJA_DIR = 'htmx_templates'
+    WEB_ROUTES = [
+        Route('/', 'public_api_web_root', 'root.jinja', public=True),
+        Route('/static', 'public_api_web_static', subpaths=True, public=True),
+        Route('/events', 'api_events')]
+
+    class Configuration(RPCKitten.Configuration):
         """MyKitten configuration"""
         WORKER_NAME = 'HTMXKitten'
+        SLEEP_TIME = 0.5
 
     async def public_api_web_root(self, _request_info):
         """/
 
-        A public landing page.
-
-        This implementation leaks our secret and is horribly insecure as a
-        result. Don't do this!
+        A minimal public landing page.
         """
-        return HttpResult(
-            'text/html',
-            SINGLE_PAGE_APP % {'secret': self.api_secret})
+        return {
+            'title': 'HTMX Kitten Test',
+            'purr_sound': 'woof'}
 
     async def api_events(self, _request_info, count=10):
         """/events
@@ -95,6 +68,27 @@ class HtmxKitten(MyKitten):
 
         # Without this, the page will reconnect automatically.
         yield {'event': 'eom', 'data': 'eom'}
+
+    async def public_api_meow(self, _request_info):
+        """/meow"""
+        return HttpResult(
+            'text/plain',           # Fixed MIME type of `text/plain`
+            'Meow world, meow!\n')  # Meow!
+
+    async def api_purr(self, _request_info,
+            count:int=1,
+            purr:str='purr',
+            sleep:float=None,
+            caps:bool=False):
+        """/purr [--count=<N>] [--purr=<sound>] [--caps=Y]"""
+        _format = self.config.worker_name + ' says %(purr)s'
+        if caps:
+            purr = purr.upper()
+        for i in range(count):
+            yield {
+                'purr': purr * (i + 1),  # Purring!
+                '_format': _format}      # Formatting rule for CLI interface
+            await asyncio.sleep(sleep or self.config.sleep_time)
 
 
 if __name__ == '__main__':

@@ -1,7 +1,7 @@
 """
 Demonstrate services which receive or send open file descriptors.
 """
-from kettlingar import RPCKitten, HttpResult
+from kettlingar import RPCKitten
 
 
 class FileCat(RPCKitten):

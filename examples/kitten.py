@@ -98,8 +98,8 @@ class MyKitten(RPCKitten, RPCKittenVarz):
         Meow and purr. This demonstrates API methods invoking each-other.
         """
         # pylint: disable=no-member
-        yield await self.meow().data
-        async for purr in self.purr(1):
+        yield (await self.meow()).data
+        async for purr in self.purr(2):
             yield purr
 
     async def api_freakout(self, _request_info):
