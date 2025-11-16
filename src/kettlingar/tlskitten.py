@@ -38,7 +38,7 @@ class TLSKitten:
         TLS_RECREATE_CERT = False
 
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)  # Req'd for cooperative inheritance
 
         # pylint: disable=access-member-before-definition
         self._rpc_start_servers = self._start_servers

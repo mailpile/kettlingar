@@ -137,7 +137,7 @@ class WebKitten:
         Route('404',      'public_api_web_404',    public=True, subpaths=True)]
 
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)  # Req'd for cooperative inheritance
 
         self.package = self.WEB_JINJA_LOADER_PACKAGE
         self.routes = None

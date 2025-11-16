@@ -18,8 +18,9 @@ class RPCKittenVarz:
     METRICS_PRUNE_OLDEST = 0
     METRICS_PRUNE_RANDOM = 1
 
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)  # Required for cooperative inheritance
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)  # Req'd for cooperative inheritance
+
         self.stats_public = {self.METRICS_TYPE_MAP: {}}
         self.stats_private = {self.METRICS_TYPE_MAP: {}}
 
