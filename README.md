@@ -226,6 +226,9 @@ Jinja templating,
 and static resources,
 you can use the `WebKitten` mix-in as demonstrated in
 [examples/htmx.py](examples/htmx.py).
+And if you want a TLS-enabled server,
+there is also a `TLSKitten` mix-in
+([tests/test_tlskitten.py](test/demo)).
 
 For lower-level applications the routing mechanism can be customzied by subclassing and overriding or extending
 `RPCKitten.get_method_name(...)` and/or

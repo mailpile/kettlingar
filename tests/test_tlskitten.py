@@ -1,5 +1,5 @@
 """
-Test the webkitten routes, templating and 404 handling.
+Test the TLS kitten, creating a self-signed cert and serving over TLS.
 """
 import asyncio
 import os
@@ -23,7 +23,7 @@ class TLSTestKitten(RPCKitten, TLSKitten, WebKitten):
 
     class Configuration(RPCKitten.Configuration, TLSKitten.Configuration):
         """Configuration!"""
-        TLS_CERT = TLSKitten.SELF_SIGNED
+        TLS_CERT = TLSKitten.SELF_SIGNED  # Instead of /path/to/cert.pem
 
     WEB_ROUTES = [Route('/zeroes/<int:n>/', 'api_zeroes', public=True)]
 
