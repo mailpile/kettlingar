@@ -91,7 +91,6 @@ class RequestInfo:
     Class describing a specific request.
     """
     def __init__(self,
-            peer=None,
             authed=False,
             reader=None,
             writer=None,
@@ -104,10 +103,10 @@ class RequestInfo:
             fds=None,
             t0=None):
         self.t0 = t0 or time.time()
-        self.peer = peer
         self.authed = authed
         self.reader = reader
         self.writer = writer
+        self.peer = self.getpeername()
         self.mimetype = mimetype
         self.encoder = encoder or (lambda d: d)
         self.method = method
@@ -120,9 +119,18 @@ class RequestInfo:
         self.handler = None
         self.is_generator = False
 
-    socket = property(lambda s: s.writer._transport._sock)
-    fileno = property(lambda s: s.writer._transport._sock.fileno())
+    socket = property(lambda s: getattr(s.writer._transport, '_sock', None))
+    fileno = property(lambda s: s.socket.fileno())
     via_unix_domain = property(lambda s: s.peer[0] == RPCKitten.PEER_UNIX_DOMAIN)
+
+    def getpeername(self):
+        """Run getpeername() if we have a socket, otherwise emulate it."""
+        # pylint: disable=protected-access
+        if hasattr(self.writer._transport, '_sock'):
+            return self.socket.getpeername() or [RPCKitten.PEER_UNKNOWN]
+        if hasattr(self.writer._transport, '_ssl_protocol'):
+            return [RPCKitten.PEER_SSL_SOCKET]
+        return [RPCKitten.PEER_UNIX_DOMAIN]
 
     def write(self, *data, writer=None):
         """Write data directly to the underlying connection."""
@@ -154,7 +162,10 @@ class RPCKitten:
     FDS_MIMETYPE = 'application/x-fd-magic'
     SSE_MIMETYPE = 'text/event-stream'
     REPLY_TO_FIRST_FD = 'reply_to_first_fd'
+
+    PEER_SSL_SOCKET = 'ssl-socket'
     PEER_UNIX_DOMAIN = 'unix-domain'
+    PEER_UNKNOWN = 'unknown'
 
     CALL_USE_JSON   = 'call_use_json'
     CALL_REPLY_TO   = 'call_reply_to'
@@ -408,6 +419,7 @@ class RPCKitten:
         self._unixfile = os.path.join(
             config.app_state_dir,
             config.worker_name + '.sock')
+        self._clean_files = [self._urlfile, self._unixfile]
         self._peeraddr = None
         self._url = None
         self._sock = None
@@ -595,7 +607,7 @@ class RPCKitten:
             self.config.app_name, self.config.worker_name, sockdesc)
 
     def _remove_files(self):
-        for f in (self._unixfile, self._urlfile):
+        for f in self._clean_files:
             try:
                 os.remove(f)
             except (FileNotFoundError, OSError):
@@ -778,11 +790,8 @@ class RPCKitten:
 
         return header, headers, request[hend+2:], fds
 
-    def _make_request_obj(self, **kwargs):
-        return RequestInfo(**kwargs)
-
     async def _serve_http(self, reader, writer):
-        req = self._make_request_obj(reader=reader, writer=writer)
+        req = RequestInfo(reader=reader, writer=writer)
 
         def _w(*data):
             # Make sure we keep writing to the original writer, even if
@@ -790,23 +799,16 @@ class RPCKitten:
             return req.write(*data, writer=writer)
 
         # pylint: disable=protected-access
-        fds_ok = False
-        req.peer = method = path = _version = peer = sent = ''
+        method = path = _version = sent = ''
         req.code = 500
         try:
             head, hdrs, body, fds = await self._http11(reader, writer, fds=True)
             method, path, _version = head.split(None, 3)[:3]
-            peer = writer._transport._sock.getpeername()
-            if not peer:
-                peer = [self.PEER_UNIX_DOMAIN]
-                fds_ok = True
 
-            req.peer = peer
             req.method = method
             req.headers = hdrs
             req.body = body
             req.fds = fds
-
             try:
                 if self.config.worker_url_path:
                     if path.startswith('/' + self.config.worker_url_path):
@@ -826,7 +828,7 @@ class RPCKitten:
             if mimetype is None and response is None:
                 sent = writer = False
             elif str(mimetype, 'utf-8') == self.FDS_MIMETYPE:
-                if not fds_ok:
+                if not req.via_unix_domain:
                     raise ValueError('Cannot send file descriptors over TCP')
                 if not isinstance(response, list):
                     response = [response]
@@ -1045,7 +1047,10 @@ class RPCKitten:
         mt = request_obj.mimetype = 'application/json'
         enc = request_obj.encoder = self.to_json
         if request_obj.method == 'POST':
-            ctype = request_obj.headers['Content-Type']
+            ctype = request_obj.headers.get('Content-Type', None)
+            if request_obj.body[:1] == b'{' and not ctype:
+                ctype = 'application/json'
+
             if ctype == 'application/x-msgpack':
                 if not (self.config.worker_use_msgpack and msgpack):
                     raise ValueError('msgpack is unavailable')
@@ -1152,9 +1157,9 @@ class RPCKitten:
         """
         return servers
 
-    async def _start_server(self):
-        return await asyncio.start_server(self._serve_http,
-            sock=self._sock)
+    async def _start_servers(self):
+        return [await asyncio.start_server(self._serve_http,
+            sock=self._sock)]
 
     async def _start_unix_server(self):
         return await asyncio.start_unix_server(self._serve_http,
@@ -1163,18 +1168,18 @@ class RPCKitten:
     async def _main_httpd_loop(self):
         self.start_time = int(time.time())
         if self.config.worker_use_tcp:
-            self._servers.append(await self._start_server())
+            self._servers.extend(await self._start_servers())
         if self.config.worker_use_unixdomain:
             self._servers.append(await self._start_unix_server())
         self._servers = await self.init_servers(self._servers)
         return await asyncio.gather(*[s.serve_forever() for s in self._servers])
 
-    def _make_server_socket(self):
+    def _make_server_socket(self, listen_host=None, listen_port=None):
         _sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         _sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         _sock.bind((
-            self.config.worker_listen_host,
-            self.config.worker_listen_port))
+            listen_host or self.config.worker_listen_host,
+            listen_port or self.config.worker_listen_port))
         _sock.settimeout(self.config.worker_accept_timeout)
         _sock.listen(self.config.worker_listen_queue)
         _sock_desc = '%s:%d' % _sock.getsockname()[:2]
@@ -1330,8 +1335,8 @@ class RPCKitten:
 
     async def _recv_data_and_fds(self, reader, bufsize=64*1024, fds=False):
         # pylint: disable=protected-access
-        sock = reader._transport._sock
-        if fds and (sock.family == socket.AF_UNIX):
+        sock = getattr(reader._transport, '_sock', None)
+        if fds and sock and (sock.family == socket.AF_UNIX):
             try:
                 reader._transport.pause_reading()
 

@@ -136,7 +136,9 @@ class WebKitten:
         Route('/static/', 'public_api_web_static', public=True, subpaths=True),
         Route('404',      'public_api_web_404',    public=True, subpaths=True)]
 
-    def __init__(self, *_args, **_kwargs):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
         self.package = self.WEB_JINJA_LOADER_PACKAGE
         self.routes = None
         self.simple_routes = {}
@@ -147,6 +149,8 @@ class WebKitten:
         self.prefix = (self.WEB_PREFIX or '').strip('/')
         if self.prefix:
             self.prefix = '/%s/' % self.prefix
+        else:
+            self.prefix = '/'
 
         # monkey patch in our route handling and setup, with fallback
         # pylint: disable=access-member-before-definition
@@ -287,7 +291,6 @@ class WebKitten:
             remap='404',
             default=self.public_api_web_404)
         if api_func:
-            print('Yes, 404 page?')
             return api_func, None, args, kwargs
 
         # Finally, if all else fails, raise an exception.
