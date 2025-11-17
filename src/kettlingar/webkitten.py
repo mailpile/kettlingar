@@ -6,7 +6,7 @@ import inspect
 import os
 import re
 
-from kettlingar import HttpResult, RequestInfo
+from kettlingar import RPCKitten, HttpResult, RequestInfo
 
 
 # pylint: disable=too-many-arguments
@@ -113,28 +113,61 @@ class WebKitten:
     STATIC_MIMETYPES = {
         'COPYING': 'text/plain',
         'README':  'text/plain',
+        'Makefile':'text/plain',
+        '.c':      'text/plain',
+        '.cpp':    'text/plain',
         '.css':    'text/css',
+        '.doc':    'application/msword',
+        '.docx':   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        '.eps':    'application/postscript',
         '.gif':    'image/gif',
+        '.h':      'text/plain',
+        '.hpp':    'text/plain',
+        '.htm':    'text/html',
+        '.html':   'text/html',
         '.ico':    'image/x-icon',
+        '.java':   'text/plain',
         '.jpg':    'image/jpeg',
         '.jpeg':   'image/jpeg',
         '.js':     'text/javascript',
         '.json':   'application/json',
         '.md':     'text/plain',
+        '.odp':    'application/vnd.oasis.opendocument.presentation',
+        '.ods':    'application/vnd.oasis.opendocument.spreadsheet',
+        '.odt':    'application/vnd.oasis.opendocument.text',
+        '.otf':    'font/otf',
+        '.pdf':    'application/pdf',
+        '.ps':     'application/postscript',
         '.png':    'image/png',
+        '.pl':     'text/plain',
         '.py':     'text/plain',
+        '.toml':   'text/plain',
+        '.ttc':    'font/collection',
+        '.ttf':    'font/ttf',
         '.txt':    'text/plain',
+        '.woff':   'font/woff',
+        '.woff2':  'font/woff2',
+        '.yml':    'text/plain',
+        '.xls':    'application/vnd.ms-excel',
+        '.xlsx':   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        '.xpm':    'image/x-pixmap',
     }
 
     WEB_JINJA_LOADER_PACKAGE = 'kettlingar'
-    WEB_STATIC_DIR = 'resources'
-    WEB_JINJA_DIR = 'templates'
+    WEB_PACKAGE_STATIC_DIR = 'resources'
+    WEB_PACKAGE_JINJA_DIR = 'templates'
     WEB_PREFIX = '/'
     WEB_ROUTES_FALL_BACK_TO_RPCKITTEN = True
     WEB_ROUTES_IGNORE = ('/ping', '/quitquitquit')
     WEB_ROUTES = [
         Route('/static/', 'public_api_web_static', public=True, subpaths=True),
         Route('404',      'public_api_web_404',    public=True, subpaths=True)]
+
+    class Configuration(RPCKitten.Configuration):
+        """Configuration variables for the webkitten."""
+        WEB_JINJA_DIR = None
+        WEB_STATIC_DIR = None
+        WEB_FOLLOW_SYMLINKS = True
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)  # Req'd for cooperative inheritance
@@ -203,33 +236,57 @@ class WebKitten:
         """Common Jinja variables. Subclasses override."""
         return {}
 
-    def jinja(self):
+    def jinja(self, recreate=False):
         """
         Return our Jinja environment, creating it if necessary. Once created
         the environment is cached as `self._jinja` for reuse.
         """
-        if self._jinja is None:
+        if recreate or self._jinja is None:
             from jinja2 import Environment, select_autoescape
             from jinja2 import PackageLoader, ChoiceLoader
+
+            loaders = [PackageLoader('kettlingar', 'templates')]  # Hard coded!
+            if self.package and self.WEB_PACKAGE_JINJA_DIR:
+                loaders += [
+                    PackageLoader(self.package, self.WEB_PACKAGE_JINJA_DIR)]
+            if getattr(self.config, 'web_jinja_dir', None):
+                loaders += [self._get_fs_loader(self.config.web_jinja_dir)]
+
             self._jinja = Environment(
                 cache_size=0,  # FIXME: Set to -1 to just cache everything
                 enable_async=True,
-                loader=ChoiceLoader([
-                    PackageLoader(self.package, self.WEB_JINJA_DIR),
-                    PackageLoader('kettlingar', 'templates'),  # Hard coded!
-                ]),
+                loader=ChoiceLoader(reversed(loaders)),
                 autoescape=select_autoescape())
         return self._jinja
 
-    def static_loader(self):
+    def _get_fs_loader(self, path):
+        from jinja2 import FileSystemLoader
+        return FileSystemLoader(path,
+            followlinks=getattr(self.config, 'web_follow_symlinks', True),
+            encoding='utf-8')
+
+    def static_loader(self, recreate=False):
         """
         Return our static resource loader, creating it if necessary. Once
         created the loader is cached as `self._static_loader` for reuse.
         """
-        if self._static_loader is None:
-            from jinja2 import PackageLoader
-            self._static_loader = PackageLoader(
-                self.package, self.WEB_STATIC_DIR)
+        if recreate or self._static_loader is None:
+            from jinja2 import PackageLoader, ChoiceLoader
+            loaders = []
+            if self.package and self.WEB_PACKAGE_STATIC_DIR:
+                loaders += [PackageLoader(
+                    self.package,
+                    self.WEB_PACKAGE_STATIC_DIR)]
+            if getattr(self.config, 'web_static_dir', None):
+                loaders += [self._get_fs_loader(self.config.web_static_dir)]
+
+            if len(loaders) > 1:
+                self._static_loader = ChoiceLoader(reversed(loaders))
+            elif loaders:
+                self._static_loader = loaders[0]
+            else:
+                raise ValueError('No static resources configured/found')
+
         return self._static_loader
 
     def web_api_methods(self, request_info):
@@ -355,15 +412,18 @@ class WebKitten:
 
     async def public_api_web_static(self, _request_info,
             path:str=None,
-            chunk_size:int=16*1024):
-        """
-        Load and return a static resource by HTTP path.
+            mimetype:str=None,
+            chunksize:int=16*1024):
+        """/static <path> [--mimetype=<T>]
+
+        Load and return a static resource by HTTP path. If not specified,
+        the MIME-type will be guessed from the filename.
         """
         resource = path or _request_info.path[(len(self.prefix) - 1):]
         if not resource or '/.' in resource:
             raise PermissionError('Invalid path: %s' % resource)
 
-        mimetype = (
+        mimetype = (mimetype or
             self.STATIC_MIMETYPES.get(os.path.basename(resource)) or
             self.STATIC_MIMETYPES.get(os.path.splitext(resource)[-1]) or
             'application/octet-stream')
@@ -376,7 +436,7 @@ class WebKitten:
         try:
             data, _, _ = self.static_loader().get_source(self.jinja(), resource)
             while data:
-                chunk, data = data[:chunk_size], data[chunk_size:]
+                chunk, data = data[:chunksize], data[chunksize:]
                 if first:
                     yield HttpResult(mimetype, chunk)
                     first = False
@@ -407,3 +467,17 @@ class WebKittenWithHelp(WebKitten):
     async def web_help(self, _request_info, *args, **kwargs):
         """Provide help."""
         return await self.api_help(_request_info, *args, **kwargs)
+
+
+if __name__ == '__main__':
+    class MiniWebKitten(RPCKitten, WebKitten):
+        """Miniature webkitten that does barely anything."""
+
+        class Configuration(WebKitten.Configuration):
+            """Configuration!"""
+            APP_NAME = 'webkitten'
+            WORKER_NAME = 'httpd'
+
+            WEB_STATIC_DIR = '.'
+
+    MiniWebKitten.Main()

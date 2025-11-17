@@ -23,8 +23,8 @@ i   The HTMX document is rendered using Jinja, based on the templates
     `examples/htmx_static`.
     """
     WEB_JINJA_LOADER_PACKAGE = 'examples.htmx'
-    WEB_STATIC_DIR = 'htmx_static'
-    WEB_JINJA_DIR = 'htmx_templates'
+    WEB_PACKAGE_STATIC_DIR = 'htmx_static'
+    WEB_PACKAGE_JINJA_DIR = 'htmx_templates'
     WEB_ROUTES = [
         Route('/', 'public_api_web_root', 'root.jinja', public=True),
         Route('/static', 'public_api_web_static', subpaths=True, public=True),

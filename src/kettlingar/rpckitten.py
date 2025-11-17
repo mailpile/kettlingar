@@ -1755,7 +1755,7 @@ Content-Length: %d
             for _k, i in all_commands.items():
                 if self.Bool(kwa.get('docs')):
                     try:
-                        i['help'] = i['api_method'].__doc__.rstrip()
+                        i['help'] = i['api_method'].__doc__.strip()
                     except AttributeError:
                         pass
                 del i['api_method']
