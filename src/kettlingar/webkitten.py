@@ -161,6 +161,7 @@ class WebKitten:
     WEB_ROUTES_IGNORE = ('/ping', '/quitquitquit')
     WEB_ROUTES = [
         Route('/static/', 'public_api_web_static', public=True, subpaths=True),
+        Route('/metrics', 'public_api_metrics',    public=True, qs=True),
         Route('404',      'public_api_web_404',    public=True, subpaths=True)]
 
     class Configuration(RPCKitten.Configuration):
