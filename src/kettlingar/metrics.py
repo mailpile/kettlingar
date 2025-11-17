@@ -5,7 +5,7 @@ RPCKitten microservice.
 import random
 
 
-class RPCKittenVarz:
+class MetricsKitten:
     """
     Work in progress - This class will be a mix-in for RPC Kittens
     that adds metrics/stats.
@@ -96,8 +96,8 @@ class RPCKittenVarz:
             if elapsed_us:
                 self.metrics_sample(pfx + '_elapsed_us', elapsed_us, public=pub)
 
-    async def public_api_varz(self, request_info):
-        """/varz
+    async def public_api_metrics(self, request_info):
+        """/metrics
 
         Return the current internal metrics.
         """

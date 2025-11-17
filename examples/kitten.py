@@ -7,7 +7,7 @@ import random
 from base64 import b64decode
 
 from kettlingar import RPCKitten, HttpResult
-from kettlingar.metrics import RPCKittenVarz
+from kettlingar.metrics import MetricsKitten
 
 
 class ExtraMethods:
@@ -22,7 +22,7 @@ class ExtraMethods:
         return HttpResult('text/plain', 'Streeeeeeeetch!\n')
 
 
-class MyKitten(RPCKitten, RPCKittenVarz):
+class MyKitten(RPCKitten, MetricsKitten):
     """mykitten - A sample kettlingar microservice
 
     This microservice knows how to meow and how to purr. Purring is

@@ -470,14 +470,16 @@ class WebKittenWithHelp(WebKitten):
 
 
 if __name__ == '__main__':
-    class MiniWebKitten(RPCKitten, WebKitten):
+    from kettlingar.metrics import MetricsKitten
+    from kettlingar.tlskitten import TLSKitten
+
+    class MiniWebKitten(RPCKitten, WebKitten, TLSKitten, MetricsKitten):
         """Miniature webkitten that does barely anything."""
 
-        class Configuration(WebKitten.Configuration):
+        class Configuration(WebKitten.Configuration, TLSKitten.Configuration):
             """Configuration!"""
             APP_NAME = 'webkitten'
             WORKER_NAME = 'httpd'
-
             WEB_STATIC_DIR = '.'
 
     MiniWebKitten.Main()
