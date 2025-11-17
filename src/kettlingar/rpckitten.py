@@ -82,9 +82,6 @@ class HttpResult(dict):
                 elif isinstance(data, bytearray):
                     self['data'] = bytes(data)
 
-    def __str__(self):
-        return '%s' % self.data
-
 
 class RequestInfo:
     """
@@ -1247,7 +1244,12 @@ class RPCKitten:
 
         Override this if you need de/serialization for app-specific data.
         """
-        return bytes(json.dumps(data) + '\n', 'utf-8')
+        def _enc(obj):
+            from base64 import b64encode
+            if isinstance(obj, (bytes, bytearray)):
+                return {'__bytes__': str(b64encode(obj), 'latin-1')}
+            raise TypeError('Unhandled data type: %s' % (type(obj).__name__,))
+        return bytes(json.dumps(data, default=_enc) + '\n', 'utf-8')
 
     def from_json(self, jd):
         """
@@ -1255,7 +1257,15 @@ class RPCKitten:
 
         Override this if you need de/serialization for app-specific data.
         """
-        return json.loads(jd if isinstance(jd, str) else str(jd, 'utf-8'))
+        def _dec(obj):
+            from base64 import b64decode
+            if len(obj) == 1:
+                b64data = obj.get('__bytes__')
+                return b64decode(b64data) if b64data else obj
+            return obj
+        return json.loads(
+            jd if isinstance(jd, str) else str(jd, 'utf-8'),
+            object_hook=_dec)
 
     def to_msgpack(self, data, default=None):
         """
@@ -1954,24 +1964,33 @@ Content-Length: %d
 
         return [a for a in args if not _is_arg(a)], kwargs
 
-    @classmethod
-    def TextFormat(cls, result):  # pylint: disable=invalid-name
-        """Default text formatting method."""
-        if isinstance(result, dict) and '_format' in result:
-            return result.pop('_format')
-        return '%s'
-
     def print_result(self, result, print_raw=False, print_json=False):
         """Print results as text."""
         if print_raw:
-            print('%s' % result)
-        elif print_json:
-            print(str(self.to_json(result), 'utf-8'))
-        elif isinstance(result, bytearray):
+            return print('%s' % result)
+
+        if isinstance(result, HttpResult):
+            result = result['data']
+
+        if print_json:
+            if isinstance(result, dict) and '_format' in result:
+                del result['_format']
+            return print(str(self.to_json(result), 'utf-8'))
+
+        if isinstance(result, (bytearray, bytes)):
             sys.stdout.buffer.write(result)
             sys.stdout.buffer.flush()
-        else:
-            print(self.TextFormat(result) % result)
+            return None
+
+        if isinstance(result, dict):
+            if '_format' in result:
+                return print(result.pop('_format') % result)
+            try:
+                return print(str(self.to_json(result), 'utf-8'))
+            except:
+                pass
+
+        return print('%s' % result)
 
     @classmethod
     def _cli_collect_needed_info(cls, message, needed_vars, kwargs):

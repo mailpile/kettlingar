@@ -237,6 +237,12 @@ class WebKitten:
         """Common Jinja variables. Subclasses override."""
         return {}
 
+    def _get_fs_loader(self, path, encoding='utf-8'):
+        from jinja2 import FileSystemLoader
+        return FileSystemLoader(path,
+            followlinks=getattr(self.config, 'web_follow_symlinks', True),
+            encoding=encoding)
+
     def jinja(self, recreate=False):
         """
         Return our Jinja environment, creating it if necessary. Once created
@@ -248,23 +254,20 @@ class WebKitten:
 
             loaders = [PackageLoader('kettlingar', 'templates')]  # Hard coded!
             if self.package and self.WEB_PACKAGE_JINJA_DIR:
-                loaders += [
-                    PackageLoader(self.package, self.WEB_PACKAGE_JINJA_DIR)]
+                loaders += [PackageLoader(
+                    self.package,
+                    self.WEB_PACKAGE_JINJA_DIR)]
             if getattr(self.config, 'web_jinja_dir', None):
                 loaders += [self._get_fs_loader(self.config.web_jinja_dir)]
 
+            loaders = list(reversed(loaders))
             self._jinja = Environment(
-                cache_size=0,  # FIXME: Set to -1 to just cache everything
+                #cache_size=0,  # FIXME: Set to -1 to just cache everything
                 enable_async=True,
-                loader=ChoiceLoader(reversed(loaders)),
+                loader=ChoiceLoader(loaders),
                 autoescape=select_autoescape())
-        return self._jinja
 
-    def _get_fs_loader(self, path):
-        from jinja2 import FileSystemLoader
-        return FileSystemLoader(path,
-            followlinks=getattr(self.config, 'web_follow_symlinks', True),
-            encoding='utf-8')
+        return self._jinja
 
     def static_loader(self, recreate=False):
         """
@@ -277,12 +280,16 @@ class WebKitten:
             if self.package and self.WEB_PACKAGE_STATIC_DIR:
                 loaders += [PackageLoader(
                     self.package,
-                    self.WEB_PACKAGE_STATIC_DIR)]
+                    self.WEB_PACKAGE_STATIC_DIR,
+                    encoding='latin-1')]
             if getattr(self.config, 'web_static_dir', None):
-                loaders += [self._get_fs_loader(self.config.web_static_dir)]
+                loaders += [self._get_fs_loader(
+                    self.config.web_static_dir,
+                    encoding='latin-1')]
 
+            loaders = list(reversed(loaders))
             if len(loaders) > 1:
-                self._static_loader = ChoiceLoader(reversed(loaders))
+                self._static_loader = ChoiceLoader(loaders)
             elif loaders:
                 self._static_loader = loaders[0]
             else:
@@ -436,6 +443,7 @@ class WebKitten:
         error = 'Not Found'
         try:
             data, _, _ = self.static_loader().get_source(self.jinja(), resource)
+            data = bytes(data, 'latin-1')
             while data:
                 chunk, data = data[:chunksize], data[chunksize:]
                 if first:
@@ -445,7 +453,7 @@ class WebKitten:
                     yield bytes(chunk, 'utf-8')
             return
         except (KeyError, OSError, IOError) as e:
-            error = str(e)
+            error = '%s(%s)' % (type(e).__name__, e)
 
         yield {'error': error, 'finished': True}
 

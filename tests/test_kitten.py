@@ -19,6 +19,13 @@ OUTPUT = []
 my_print = OUTPUT.append
 
 
+class MyTestingKitten(MyKitten):
+    """Test kitten which returns binary API data."""
+    async def api_binary_result(self, _request_info):
+        """This would fail to JSON serialize, without Steps Being Taken."""
+        return {'binary': b'data'}
+
+
 async def call_slow_meow(kitty, which, delay):
     """Async task wrapper for calling kitty.slow_meow"""
     my_print("%s: %s" % (which, await kitty.slow_meow(delay=delay)))
@@ -41,7 +48,7 @@ async def full_test_function(*args):
         if loopback:
             args.remove('--loopback')
 
-        kitty = MyKitten(args=args)
+        kitty = MyTestingKitten(args=args)
 
         # Make sure ping before connect fails
         try:
@@ -70,6 +77,11 @@ async def full_test_function(*args):
         assert meow['mimetype'] == 'image/gif'
         assert isinstance(meow['data'], bytes)
         assert meow['data'].startswith(b'GIF89a')
+
+        # Test binary API responses
+        bintest = await kitty.binary_result()
+        assert isinstance(bintest['binary'], bytes)
+        assert bintest['binary'] == b'data'
 
         # Test: Ensure expose_methods(ExtraMethods()) did its job
         stretch = await kitty.stretch()
