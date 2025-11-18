@@ -18,7 +18,7 @@ class HtmxKitten(RPCKitten, WebKitten):
     how to use HTMX kettlingar as a back-end for HTMX pages. There is
     a demo of how to use Server Sent Events with HTMX as well.
 
-i   The HTMX document is rendered using Jinja, based on the templates
+    The HTMX document is rendered using Jinja, based on the templates
     found in `examples/htmx_templates` and static resources in
     `examples/htmx_static`.
     """
@@ -30,7 +30,7 @@ i   The HTMX document is rendered using Jinja, based on the templates
         Route('/static', 'public_api_web_static', subpaths=True, public=True),
         Route('/events', 'api_events')]
 
-    class Configuration(RPCKitten.Configuration):
+    class Configuration(WebKitten.Configuration):
         """MyKitten configuration"""
         WORKER_NAME = 'HTMXKitten'
         SLEEP_TIME = 0.5
