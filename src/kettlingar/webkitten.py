@@ -237,7 +237,7 @@ class WebKitten:
         try:
             # pylint: disable=unused-import
             import jinja2
-        except:
+        except ImportError:
             self.warning('WARNING:'
                 ' Failed to load jinja2,'
                 ' need it for templates and static content.')
