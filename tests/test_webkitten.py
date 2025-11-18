@@ -69,6 +69,8 @@ async def run_tests(*args):
         kitty = await WebTestKitten(args=args).connect(auto_start=True)
         assert(kitty.web_url().endswith('test/'))
 
+        print('Public URL: %s' % kitty.web_url(public=True))
+        print('Private URL: %s' % kitty.web_url())
         print(await kitty.web_routes())
 
         # Test our web_url helper

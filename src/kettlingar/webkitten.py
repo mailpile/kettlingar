@@ -55,10 +55,14 @@ class Route:
             repr(self.path_rule).replace('re.compile(', 're('),
             self.api_method, self.template, self.public, self.qs)
 
-    def compile(self):
+    def compile(self, have_jinja=True):
         """Convert django-style path rules into compiled regexes."""
         if isinstance(self.path_rule, re.Pattern):
             return self
+
+        if (not have_jinja) and (self.template
+                or self.api_method == 'public_api_web_static'):
+            raise ValueError('Cannot render templates without jinja2')
 
         parts = self.path_rule.split('/')
         for i, p in enumerate(parts):
@@ -226,8 +230,20 @@ class WebKitten:
         import locale
         locale.setlocale(locale.LC_TIME, "C")
 
+        # Make sure this actually loads, if it does not make sure
+        # log something human readable.  Lazy loading is nice for
+        # perf, but makes some things harder to debug.
+        try:
+            # pylint: disable=unused-import
+            import jinja2
+        except:
+            self.warning('WARNING:'
+                ' Failed to load jinja2,'
+                ' need it for templates and static content.')
+            jinja2 = None
+
         # Compile our route map, create simple_routes shortcuts
-        self.routes = [r.compile() for r in self.WEB_ROUTES]
+        self.routes = [r.compile(have_jinja=jinja2) for r in self.WEB_ROUTES]
         self.simple_routes = dict(
             (r.path_rule, r) for r in self.routes if r.simple)
 
@@ -302,7 +318,7 @@ class WebKitten:
                 loaders += [PackageLoader(
                     self.package,
                     self.WEB_PACKAGE_STATIC_DIR,
-                    encoding='latin-1')]
+                    encoding='utf-8')]
             if getattr(self.config, 'web_static_dir', None):
                 loaders += [self._get_fs_loader(
                     self.config.web_static_dir,

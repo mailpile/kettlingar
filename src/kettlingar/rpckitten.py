@@ -742,9 +742,12 @@ class RPCKitten:
         hend = header = headers = None
         request = bytearray()
 
-        close = writer.close
-        to1 = loop.call_later(cfg.worker_http_request_timeout1, close)
-        to2 = loop.call_later(cfg.worker_http_request_timeout2, close)
+        def _closer():
+            self.debug('Timed out, closing %s' % writer)
+            writer.close()
+
+        to1 = loop.call_later(cfg.worker_http_request_timeout1, _closer)
+        to2 = loop.call_later(cfg.worker_http_request_timeout2, _closer)
 
         cr = ord(b'\r')
         want_bytes = 8192
@@ -1093,7 +1096,7 @@ class RPCKitten:
         if raw_method is not None:
             _wrapped = self._wrap_drain_and_close(raw_method)
             create_background_task(_wrapped(request_obj, *args, **kwargs))
-            return writer, 200, None, None
+            return None, 200, None, None
 
         try:
             resp = await api_method(request_obj, *args, **kwargs)
@@ -1324,7 +1327,7 @@ class RPCKitten:
                 self.exception('Unix socket connection failed')
 
         host, port = host_port.rsplit(':', 1)
-        rd_wr = await asyncio.open_connection(host, int(port))
+        rd_wr = await asyncio.open_connection(host, int(port), limit=8192)
         self._peeraddr = rd_wr[0]._transport._sock.getpeername()
         return ('/' + path), False, rd_wr
 
@@ -1527,7 +1530,7 @@ Content-Length: %d
             if 200 <= resp_code < 300:
                 if (not isinstance(result, dict)) or ('error' not in result):
                     if chunked:
-                        return self._chunk_decoder(reader, hdrs, body, rfds)
+                        return self._chunk_decoder(reader, writer, hdrs, body, rfds)
                     return result
                 resp_code = 500
 
@@ -1572,7 +1575,7 @@ Content-Length: %d
             pass
         return None, buffer
 
-    def _chunk_decoder(self, reader, hdrs, buffer, rfds):
+    def _chunk_decoder(self, reader, writer, hdrs, buffer, rfds):
         # pylint: disable=unnecessary-lambda-assignment
 
         ctype = hdrs['Content-Type']
@@ -1586,7 +1589,7 @@ Content-Length: %d
             decode = lambda v: v
 
         async def decoded_chunk_generator():
-            nonlocal reader, buffer
+            nonlocal reader, writer, buffer
             if rfds:
                 yield {'received_fds': rfds}
 
@@ -1594,18 +1597,22 @@ Content-Length: %d
             while True:
                 chunk, buffer = self._http11_chunk(buffer)
                 if chunk is None:
-                    if reader:
-                        data = await reader.read(8192)
-                        if data:
-                            buffer += data
-                        else:
-                            reader = None
-                    else:
+                    if not reader:
+                        # Note: This use of the writer mainly keeps it in
+                        # scope.  As it owns the socket, if it gets GC'ed
+                        # then the connection closes prematurely.
+                        writer.close()
                         break
+                    data = await reader.read(8192)
+                    if data:
+                        buffer += data
+                    else:
+                        reader = None
                 elif chunk == b'':
                     finished = True
                 else:
                     yield decode(chunk)
+                    finished = False
 
             if not finished:
                 # FIXME: This needs documenting!
@@ -1734,6 +1741,9 @@ Content-Length: %d
                 else:
                     self._send_chunked(request_obj, enc(data))
                     # Deliberatly not sending the completed marker, we exploded
+
+            finally:
+                pass  #print('E> Goodbye loopy')
 
         return raw_method
 
