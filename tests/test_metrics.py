@@ -71,11 +71,12 @@ async def run_tests(*args):
 
         # Check public vs. private metrics: the api_echo method is not public,
         # so stats about it should be omitted from the public metrics as well.
+        # This also tests requesting labels be applied to all output.
         for pub in (False, True):
-            metrics_url = kitty.web_url('/metrics?openmetrics=Y', public=pub)
-            data = urlopen(metrics_url).read()
-            assert(b'http{code="200"}' in data)
-            assert((b'api_echo{code="200"}' in data) != pub)
+            url = kitty.web_url('/metrics?openmetrics=Y&foo=bar', public=pub)
+            data = urlopen(url).read()
+            assert(b'http{foo="bar", code="200"}' in data)
+            assert((b'api_echo{foo="bar", code="200"}' in data) != pub)
 
     finally:
         await kitty.quitquitquit()

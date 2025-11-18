@@ -7,6 +7,9 @@ import random
 from kettlingar import HttpResult
 
 
+# pylint: disable=too-many-branches
+
+
 class MetricsKitten:
     """
     Work in progress - This class will be a mix-in for RPC Kittens
@@ -122,17 +125,21 @@ class MetricsKitten:
             if elapsed_us:
                 self.metrics_sample(pfx + '_elapsed_us', elapsed_us, public=pub)
 
-    def _format_openmetrics(self, varz):
+    def _format_openmetrics(self, varz, labels):
         type_map = varz.pop(self.METRICS_TYPE_MAP)
         output = []
         emit = output.append
+        labeling = ', '.join('%s="%s"' % kv for kv in labels.items())
         for var in sorted(varz.keys()):
             if ',' in var:
                 vl = var.split(',')
                 vn = vl.pop(0)
-                vl = '{%s}' % ', '.join(vl)
+                if labeling:
+                    vl = '{%s, %s}' % (labeling, ', '.join(vl))
+                else:
+                    vl = '{%s}' % ', '.join(vl)
             else:
-                vn, vl = var, ''
+                vn, vl = var, ('{%s}' % labeling) if labeling else ''
 
             val = varz[var]
             dtype = type_map.get(var, self.METRICS_GAUGE)
@@ -168,11 +175,17 @@ class MetricsKitten:
         emit('# EOF\n')
         return '\n'.join(output)
 
-    async def public_api_metrics(self, request_info, openmetrics:bool=False):
+    async def public_api_metrics(self, request_info,
+            openmetrics:bool=False,
+            **labels):
         """/metrics
 
         Return the current internal metrics. Authenticated requests will
         see private metrics, otherwise we only expose the public ones.
+
+        When generating openmetrics, additional labels can be applied to
+        all the output by passing them as arguments. This is designed to
+        facilitate merging metrics from multiple sources.
         """
         varz = {}
         if hasattr(self, 'start_time'):
@@ -192,4 +205,4 @@ class MetricsKitten:
 
         return HttpResult(
             'application/openmetrics-text; version=1.0.0; charset=utf-8',
-            self._format_openmetrics(varz))
+            self._format_openmetrics(varz, labels))
