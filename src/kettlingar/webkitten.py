@@ -171,6 +171,7 @@ class WebKitten:
     class Configuration(RPCKitten.Configuration):
         """Configuration variables for the webkitten."""
         WEB_JINJA_DIR = None
+        WEB_JINJA_CACHE_SIZE = 200
         WEB_STATIC_DIR = None
         WEB_FOLLOW_SYMLINKS = True
 
@@ -298,8 +299,9 @@ class WebKitten:
                 loaders += [self._get_fs_loader(self.config.web_jinja_dir)]
 
             loaders = list(reversed(loaders))
+            cache_size = int(getattr(self.config, 'web_jinja_cache_size', 0))
             self._jinja = Environment(
-                #cache_size=0,  # FIXME: Set to -1 to just cache everything
+                cache_size=cache_size,
                 enable_async=True,
                 loader=ChoiceLoader(loaders),
                 autoescape=select_autoescape())
