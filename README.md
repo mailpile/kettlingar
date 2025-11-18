@@ -22,6 +22,7 @@ Some features:
 - Python type annotations are used to validate/convert arguments
 - Serve over TCP/IP and over a local unix domain socket
 - Built in CLI for configuring, running and interacting with the service
+- Tested on Python 3.10, 3.13 and 3.14
 
 See below for a bit more discussion about these features.
 
@@ -32,9 +33,8 @@ Status: Useful!
 
 TODO:
 
-- Write automated tests
 - Improve and document how we do logging
-- Improve and document varz and internal stats
+- Document metrics and internal stats
 - Document the `public_raw_` and `raw_` magic prefixes
 - Document error handling / exception propogation
 - Add websocket support
