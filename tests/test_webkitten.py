@@ -13,6 +13,7 @@ from kettlingar.webkitten import WebKitten, Route
 
 
 # pylint: disable=consider-using-with
+# pylint: disable=too-many-locals
 
 
 class WebTestKitten(RPCKitten, WebKitten):
@@ -24,7 +25,11 @@ class WebTestKitten(RPCKitten, WebKitten):
         Route('/echo', 'api_echo', qs=True),
         Route('/zeroes/<int:n>/', 'api_zeroes'),
         Route('/pages/', 'public_api_pages', 'base.jinja', public=True, subpaths='more'),
+        Route('/static/', 'public_api_web_static', public=True, subpaths=True),
         Route('404', 'public_api_e404', public=True, subpaths=True)]
+
+    class Configuration(WebKitten.Configuration):
+        """Config"""
 
     async def api_echo(self, _ri, words:str=None, n:int=0):
         """Just echo back some words."""
@@ -52,10 +57,12 @@ async def run_tests(*args):
     """Create a webkitten and test it."""
     try:
         testdir = tempfile.mkdtemp(suffix='webkitten')
+        srcdir = os.path.dirname(__file__)
 
         args = list(args)
         args.extend([
             '--worker-secret=SECRET',
+            '--web-static-dir=' + srcdir,
             '--app-state-dir=' + testdir,
             '--app-data-dir=' + testdir])
 
@@ -106,6 +113,19 @@ async def run_tests(*args):
                 assert(not urlopen(e404_url).read())
             except HTTPError as e:
                 assert(b'Oh noes' in e.read())
+
+        # Verify that we correctly serve binary data
+        async def collect(gen):
+            data = []
+            async for b in gen:
+                data.append(b)
+            return b''.join(data)
+
+        # Verify that web_static correctly serves binary data
+        test_data = open(os.path.join(srcdir, 'all-bytes.bin'), 'rb').read()
+        bytes_url = kitty.web_url('/static/all-bytes.bin')
+        assert test_data == urlopen(bytes_url).read()
+        assert test_data == await collect(kitty.web_static('all-bytes.bin'))
 
     finally:
         await kitty.quitquitquit()

@@ -237,11 +237,32 @@ class WebKitten:
         """Common Jinja variables. Subclasses override."""
         return {}
 
-    def _get_fs_loader(self, path, encoding='utf-8'):
+    def _get_fs_loader(self, path, binary=False):
+        import posixpath
         from jinja2 import FileSystemLoader
-        return FileSystemLoader(path,
-            followlinks=getattr(self.config, 'web_follow_symlinks', True),
-            encoding=encoding)
+        from jinja2.loaders import split_template_path
+        from jinja2.exceptions import TemplateNotFound
+
+        if not binary:
+            return FileSystemLoader(path,
+                followlinks=getattr(self.config, 'web_follow_symlinks', True),
+                encoding='utf-8')
+
+        class BinaryFileSystemLoader(FileSystemLoader):
+            """A binary-mode FileSystemLoader"""
+            def get_source(self, _environment, template):
+                """Fetch the source, return bytes!"""
+                pieces = split_template_path(template)
+                for searchpath in self.searchpath:
+                    fn = posixpath.join(searchpath, *pieces)
+                    if os.path.isfile(fn):
+                        with open(fn, 'rb') as fd:
+                            return fd.read(), fn, lambda: False
+                raise TemplateNotFound(template, 'Tried: %s' % self.searchpath)
+
+        return BinaryFileSystemLoader(path,
+            followlinks=getattr(self.config, 'web_follow_symlinks', True))
+
 
     def jinja(self, recreate=False):
         """
@@ -285,7 +306,7 @@ class WebKitten:
             if getattr(self.config, 'web_static_dir', None):
                 loaders += [self._get_fs_loader(
                     self.config.web_static_dir,
-                    encoding='latin-1')]
+                    binary=True)]
 
             loaders = list(reversed(loaders))
             if len(loaders) > 1:
@@ -443,14 +464,14 @@ class WebKitten:
         error = 'Not Found'
         try:
             data, _, _ = self.static_loader().get_source(self.jinja(), resource)
-            data = bytes(data, 'latin-1')
+            data = bytes(data, 'utf-8') if isinstance(data, str) else data
             while data:
                 chunk, data = data[:chunksize], data[chunksize:]
                 if first:
                     yield HttpResult(mimetype, chunk)
                     first = False
                 else:
-                    yield bytes(chunk, 'utf-8')
+                    yield chunk
             return
         except (KeyError, OSError, IOError) as e:
             error = '%s(%s)' % (type(e).__name__, e)
