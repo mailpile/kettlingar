@@ -207,9 +207,6 @@ class RPCKitten:
     _HTTP_NOT_FOUND = (b'Content-Type: application/json\n'
                   b'Connection: close\n\n'
                   b'{"error": "Not Found"}\n')
-    _HTTP_SORRY = (b'Content-Type: application/json\n'
-                  b'Connection: close\n\n'
-                  b'{"error": "Sorry"}\n')
     _HTTP_MOVED = (b'Content-Type: application/json\n'
                   b'Connection: close\n'
                   b'Location: %s\n\n'
@@ -860,9 +857,12 @@ class RPCKitten:
                     'error': str(e),
                     'resource': e.resource,
                     'needed_vars': e.needed_vars}))
-        except PermissionError:
+        except PermissionError as e:
             req.code = 403
-            sent = _w(self._HTTP_RESPONSE[req.code], self._HTTP_SORRY)
+            sent = _w(
+                self._HTTP_RESPONSE[req.code],
+                self._HTTP_JSON,
+                self.to_json({'error': str(e)}))
         except AttributeError:
             req.code = 404
             sent = _w(self._HTTP_RESPONSE[req.code], self._HTTP_NOT_FOUND)
@@ -1115,6 +1115,8 @@ class RPCKitten:
         except RPCKitten.RedirectException:
             raise
         except RPCKitten.NeedInfoException:
+            raise
+        except PermissionError:
             raise
         except Exception as e:
             import traceback
