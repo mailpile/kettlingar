@@ -2117,7 +2117,7 @@ Content-Length: %d
                     await self.connect()
                 except cls.NotRunning:
                     if command == 'help':
-                        _, result = await self.api_help(None, *args, **kwargs)
+                        result = await self.api_help(None, *args, **kwargs)
                         return _print_result(result)
                     raise
 
