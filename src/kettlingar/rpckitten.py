@@ -124,10 +124,10 @@ class RequestInfo:
         """Run getpeername() if we have a socket, otherwise emulate it."""
         # pylint: disable=protected-access
         if hasattr(self.writer._transport, '_sock'):
-            return self.socket.getpeername() or [RPCKitten.PEER_UNKNOWN]
+            return self.socket.getpeername() or [RPCKitten.PEER_UNIX_DOMAIN]
         if hasattr(self.writer._transport, '_ssl_protocol'):
             return [RPCKitten.PEER_SSL_SOCKET]
-        return [RPCKitten.PEER_UNIX_DOMAIN]
+        return [RPCKitten.PEER_UNKNOWN]
 
     def write(self, *data, writer=None):
         """Write data directly to the underlying connection."""
@@ -830,10 +830,15 @@ class RPCKitten:
                 if not isinstance(response, list):
                     response = [response]
 
+                if req.sent:
+                    # Avoid repeating the HTTP header, hope this is fine
+                    http_res = b''
+                else:
+                    http_res = self._HTTP_200_OK % b'application/json'
+
                 fd_list = [r.fileno() for r in response]
-                http_res = (
-                    self._HTTP_200_OK % b'application/json' +
-                    self.to_json([self._fd_to_magic_arg(a) for a in response]))
+                http_res += self.to_json([
+                    self._fd_to_magic_arg(a) for a in response])
 
                 await self._send_data_and_fds(writer, http_res, fd_list)
                 req.sent += len(http_res)
@@ -841,7 +846,11 @@ class RPCKitten:
             else:
                 l1 = (self._HTTP_RESPONSE.get(req.code) or
                     (self._HTTP_RESPONSE_UNKNOWN % req.code))
-                sent = _w(l1, (self._HTTP_MIMETYPE % mimetype), response)
+                if req.sent:
+                    # Avoid repeating the HTTP header, hope this is fine
+                    sent = _w(response)
+                else:
+                    sent = _w(l1, (self._HTTP_MIMETYPE % mimetype), response)
 
         except RPCKitten.RedirectException as e:
             req.code = 302
@@ -1075,7 +1084,8 @@ class RPCKitten:
 
         if request_obj.fds:
             args = [self._fd_from_magic_arg(a, request_obj.fds) for a in args]
-            if request_obj.body.pop(self.REPLY_TO_FIRST_FD, False):
+            reply_to_fd1 = request_obj.body.pop(self.REPLY_TO_FIRST_FD, None)
+            if reply_to_fd1 is not None:
                 fd = args.pop(0)
                 if isinstance(fd, socket.socket):
                     _, writer = await asyncio.open_connection(sock=fd)
@@ -1085,6 +1095,7 @@ class RPCKitten:
                 await request_obj.writer.drain()
                 request_obj.writer.close()
                 request_obj.writer = writer
+                request_obj.sent = int(reply_to_fd1)
 
         if has_annotations:
             self._apply_annotations(has_annotations, args, kwargs)
@@ -1457,12 +1468,14 @@ class RPCKitten:
 
         reply_to = kwargs.pop(self.CALL_REPLY_TO, None)
         if reply_to:
+            sent_bytes = 0
             if isinstance(reply_to, RequestInfo):
                 if (not use_json) and ('/json' in reply_to.mimetype):
                     use_json = True
+                sent_bytes = reply_to.sent
                 reply_to = reply_to.socket
             args = [reply_to] + list(args)
-            kwargs[self.REPLY_TO_FIRST_FD] = True
+            kwargs[self.REPLY_TO_FIRST_FD] = sent_bytes
 
         allow_unix = self.Bool(kwargs.pop(self.CALL_ALLOW_UNIX, True))
         retries = int(kwargs.pop(self.CALL_MAX_TRIES, 2))
@@ -1712,8 +1725,9 @@ Content-Length: %d
                                 re.http_code = resp['finished']
                                 raise re
 
-                        mt = bytes(resp_mimetype, 'utf-8')
-                        request_obj.write(self._HTTP_200_CHUNKED_OK % mt)
+                        if not request_obj.sent:
+                            mt = bytes(resp_mimetype, 'utf-8')
+                            request_obj.write(self._HTTP_200_CHUNKED_OK % mt)
 
                     self._send_chunked(request_obj, enc(resp))
                     await request_obj.writer.drain()
