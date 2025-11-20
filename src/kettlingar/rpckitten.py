@@ -1243,7 +1243,7 @@ class RPCKitten:
                 event[k] = v[1:]
         return event
 
-    def to_json(self, data):
+    def to_json(self, data, friendly=False):
         """
         Serializes the data to JSON, returning the generated JSON as bytes.
 
@@ -1252,7 +1252,12 @@ class RPCKitten:
         def _enc(obj):
             from base64 import b64encode
             if isinstance(obj, (bytes, bytearray)):
-                return {'__bytes__': str(b64encode(obj), 'latin-1')}
+                if friendly:
+                    try:
+                        return {'__bytes__': str(obj, 'utf-8')}
+                    except UnicodeDecodeError:
+                        pass
+                return {'__base64__': str(b64encode(obj), 'latin-1')}
             raise TypeError('Unhandled data type: %s' % (type(obj).__name__,))
         return bytes(json.dumps(data, default=_enc) + '\n', 'utf-8')
 
@@ -1265,8 +1270,13 @@ class RPCKitten:
         def _dec(obj):
             from base64 import b64decode
             if len(obj) == 1:
-                b64data = obj.get('__bytes__')
-                return b64decode(b64data) if b64data else obj
+                # pylint: disable=unnecessary-lambda
+                for key, decode in (
+                        ('__base64__', lambda d: b64decode(d)),
+                        ('__bytes__',  lambda d: bytes(d, 'utf-8'))):
+                    data = obj.get(key)
+                    if data:
+                        return decode(data)
             return obj
         return json.loads(
             jd if isinstance(jd, str) else str(jd, 'utf-8'),
@@ -1987,7 +1997,7 @@ Content-Length: %d
         if print_json:
             if isinstance(result, dict) and '_format' in result:
                 del result['_format']
-            return print(str(self.to_json(result), 'utf-8'))
+            return print(str(self.to_json(result, friendly=True), 'utf-8'))
 
         if isinstance(result, (bytearray, bytes)):
             sys.stdout.buffer.write(result)
@@ -1998,7 +2008,7 @@ Content-Length: %d
             if '_format' in result:
                 return print(result.pop('_format') % result)
             try:
-                return print(str(self.to_json(result), 'utf-8'))
+                return print(str(self.to_json(result, friendly=True), 'utf-8'))
             except:
                 pass
 
