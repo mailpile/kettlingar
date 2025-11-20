@@ -77,15 +77,21 @@ async def run_tests(*args):
             contents = str(fd.read(), 'utf-8')
             assert('THAT STRING' in contents)
 
+        # Configure kitties to play together
         assert(kitty2.config.worker_name != kitty1.config.worker_name)
         assert(await kitty1.play_with(kitty2.config.worker_name))
         assert(await kitty2.play_with(kitty1.config.worker_name))
 
+        # Play a game of ping-pong!
         results = []
-        async for pp in kitty1.ping_pong('mousey', 4):
+        async for pp in kitty1.ping_pong('mousey', 10):
             assert('mousey' in pp)
             results.append(pp)
-        assert(len(results) == 4)
+
+        # We should have ten results! There are not ten yields in the code.
+        assert(len(results) == 10)
+
+        # Check to be sure the kitties took turns nicely
         assert(kitty1.config.worker_name in results[0])
         assert(kitty2.config.worker_name in results[1])
         assert(kitty1.config.worker_name in results[2])
