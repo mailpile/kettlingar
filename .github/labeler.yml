@@ -1,11 +1,12 @@
 # Add 'docs' to any changes within 'docs' folder or any subfolders
-documentation:
+docs:
+- README.md
 - docs/**/*
 
 example:
 - examples/**/*
 
-test:
+tests:
 - tests/**/*
 
 CI:
