@@ -116,9 +116,19 @@ class RequestInfo:
         self.handler = None
         self.is_generator = False
 
+    caller = property(lambda s: s.caller_info())
     socket = property(lambda s: getattr(s.writer._transport, '_sock', None))
     fileno = property(lambda s: s.socket.fileno())
     via_unix_domain = property(lambda s: s.peer[0] == RPCKitten.PEER_UNIX_DOMAIN)
+
+    def caller_info(self):
+        """Return info about the caller of the function."""
+        peer = ':'.join(str(i) for i in self.peer[:2])
+        if hasattr(self, 'user_info'):
+            return '%s@%s' % (self.user_info, peer)
+        if self.authed:
+            return '(api)@' + peer
+        return '(public)' + peer
 
     def getpeername(self):
         """Run getpeername() if we have a socket, otherwise emulate it."""
@@ -159,6 +169,8 @@ class RPCKitten:
     FDS_MIMETYPE = 'application/x-fd-magic'
     SSE_MIMETYPE = 'text/event-stream'
     REPLY_TO_FIRST_FD = 'reply_to_first_fd'
+
+    REQUEST_INFO_CLS = RequestInfo
 
     PEER_SSL_SOCKET = 'ssl-socket'
     PEER_UNIX_DOMAIN = 'unix-domain'
@@ -788,7 +800,7 @@ class RPCKitten:
         return header, headers, request[hend+2:], fds
 
     async def _serve_http(self, reader, writer):
-        req = RequestInfo(reader=reader, writer=writer)
+        req = self.REQUEST_INFO_CLS(reader=reader, writer=writer)
 
         def _w(*data):
             # Make sure we keep writing to the original writer, even if
@@ -1039,6 +1051,17 @@ class RPCKitten:
             for k, v in kwargs.items():
                 kwargs[k] = self.guarantee_type(annotations.get(k), v)
 
+    def mutate_web_arguments(self, _req_info, annotated_func, args, kwargs):
+        """Mutate incoming web arguments: modifies args and kwargs in place
+
+        Subclasses can override this if they want to add custom argument
+        processing before the API method is run. By default this will use
+        type annotations to validate/convert arguments, so if you want that
+        to keep working remember to call super().mutate_web_arguments(...).
+        """
+        if annotated_func:
+            self._apply_annotations(annotated_func, args, kwargs)
+
     async def _handle_http_request(self, request_obj):
         def _b(v):
             return v if isinstance(v, bytes) else bytes(v, 'utf-8')
@@ -1097,12 +1120,12 @@ class RPCKitten:
                 request_obj.writer = writer
                 request_obj.sent = int(reply_to_fd1)
 
-        if has_annotations:
-            self._apply_annotations(has_annotations, args, kwargs)
-
         if inspect.isasyncgenfunction(api_method):
             raw_method = self._wrap_async_generator(api_method)
             request_obj.is_generator = True
+
+        # Before we run: apply type annotations, maybe other fun things...
+        self.mutate_web_arguments(request_obj, has_annotations, args, kwargs)
 
         if raw_method is not None:
             _wrapped = self._wrap_drain_and_close(raw_method)
