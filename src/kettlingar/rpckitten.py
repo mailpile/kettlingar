@@ -2000,10 +2000,11 @@ Content-Length: %d
 
         return [a for a in args if not _is_arg(a)], kwargs
 
-    def print_result(self, result, print_raw=False, print_json=False):
+    def print_result(self, result,
+            print_raw=False, print_json=False, target=sys.stdout):
         """Print results as text."""
         if print_raw:
-            return print('%s' % result)
+            return target.write('%s\n' % result)
 
         if isinstance(result, HttpResult):
             result = result['data']
@@ -2011,18 +2012,20 @@ Content-Length: %d
         if print_json:
             if isinstance(result, dict) and '_format' in result:
                 del result['_format']
-            return print(str(self.to_json(result, friendly=True), 'utf-8'))
+            return target.write(
+                str(self.to_json(result, friendly=True), 'utf-8') + '\n')
 
         if isinstance(result, (bytearray, bytes)):
-            sys.stdout.buffer.write(result)
-            sys.stdout.buffer.flush()
+            target.buffer.write(result)
+            target.buffer.flush()
             return None
 
         if isinstance(result, dict):
             if '_format' in result:
-                return print(result.pop('_format') % result)
+                return target.write(result.pop('_format') % result + '\n')
             try:
-                return print(str(self.to_json(result, friendly=True), 'utf-8'))
+                return target.write(
+                    str(self.to_json(result, friendly=True), 'utf-8') + '\n')
             except:
                 pass
 
