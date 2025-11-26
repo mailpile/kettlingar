@@ -1293,7 +1293,7 @@ class RPCKitten:
             jd if isinstance(jd, str) else str(jd, 'utf-8'),
             object_hook=_dec)
 
-    def to_msgpack(self, data, default=None):
+    def to_msgpack(self, data, default=None, **kwa):
         """
         Serializes the data to msgpack, returning the packed data as bytes.
 
@@ -1310,11 +1310,11 @@ class RPCKitten:
                 return default(obj)
             raise TypeError('Unhandled data type: %s' % (type(obj).__name__,))
         try:
-            return msgpack.packb(data, default=_to_exttype)
+            return msgpack.packb(data, default=_to_exttype, **kwa)
         except Exception as exc:
             raise ValueError('to_msgpack failed: %s' % (exc,)) from exc
 
-    def from_msgpack(self, d, ext_hook=None):
+    def from_msgpack(self, d, ext_hook=None, **kwa):
         """
         Deserializes data from msgpack.
 
@@ -1332,7 +1332,7 @@ class RPCKitten:
         if not d:
             return None
         d = d if isinstance(d, (bytes, bytearray)) else bytes(d, 'latin-1')
-        return msgpack.unpackb(d, ext_hook=_from_exttype)
+        return msgpack.unpackb(d, ext_hook=_from_exttype, **kwa)
 
     async def _url_connect(self, url, allow_unix=True):
         # pylint: disable=protected-access
