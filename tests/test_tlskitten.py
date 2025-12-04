@@ -29,7 +29,7 @@ class TLSTestKitten(RPCKitten, TLSKitten, WebKitten):
 
     async def api_zeroes(self, _ri, n:int=10):
         """Generate some zeroes"""
-        yield HttpResult('text/plain', '0')
+        yield HttpResult('text/plain', b'0')
         for _i in range(n - 1):
             yield b'0'
 
@@ -49,7 +49,8 @@ async def run_tests(*args):
 
         # Verify the basic API works
         async for z in kitty.zeroes(n=5):
-            assert(z == b'0')
+            data = z['data'] if isinstance(z, dict) else z
+            assert(data == b'0')
 
         # Check the generator function
         zero_url = kitty.web_url('/zeroes/7/')

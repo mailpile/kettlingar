@@ -120,7 +120,7 @@ async def run_tests(*args):
         async def collect(gen):
             data = []
             async for b in gen:
-                data.append(b)
+                data.append(b['data'] if isinstance(b, dict) else b)
             return b''.join(data)
 
         # Verify that web_static correctly serves binary data

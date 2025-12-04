@@ -64,7 +64,8 @@ class HttpResult(dict):
 
     def __init__(self, mimetype, data,
             redirect_to=None,
-            http_code=None):
+            http_code=None,
+            binary_data=False):
         self['mimetype'] = mimetype
         self['data'] = data
         if redirect_to:
@@ -73,7 +74,7 @@ class HttpResult(dict):
         if http_code:
             self['http_code'] = http_code
         if mimetype:
-            if mimetype[:5] == 'text/':
+            if mimetype[:5] == 'text/' and not binary_data:
                 if isinstance(data, (bytes, bytearray)):
                     self['data'] = str(data, 'utf-8')
             else:
@@ -111,6 +112,7 @@ class RequestInfo:
         self.path = path
         self.body = body
         self.fds = [] if (fds is None) else fds
+        self.stdin = None
         self.sent = 0
         self.code = 500  # Failing to update this is an error
         self.handler = None
@@ -120,6 +122,10 @@ class RequestInfo:
     socket = property(lambda s: getattr(s.writer._transport, '_sock', None))
     fileno = property(lambda s: s.socket.fileno())
     via_unix_domain = property(lambda s: s.peer[0] == RPCKitten.PEER_UNIX_DOMAIN)
+
+    def __str__(self):
+        return '<%s (%s %s) authed=%s gen=%s>' % (
+            type(self), self.caller, self.path, self.authed, self.is_generator)
 
     def caller_info(self):
         """Return info about the caller of the function."""
@@ -166,6 +172,15 @@ class RPCKitten:
     _MAGIC_FD = '_FD_BRE_MAGIC_'
     _MAGIC_SOCK = '_SO_BRE_MAGIC_'
 
+    # Set this to True, to force all kwargs to be lists of values.
+    # OR set to an iterable of option keys that should be lists.
+    # OR leave False to cause the parser to raise on duplicates.
+    ALLOW_REPEATED_OPTIONS = False
+
+    # Set this to True, to make the CLI send stdin's file descriptor
+    # over the wire by default, when it is not a TTY.
+    SEND_STDIN_IF_NOT_A_TTY = False
+
     FDS_MIMETYPE = 'application/x-fd-magic'
     SSE_MIMETYPE = 'text/event-stream'
     REPLY_TO_FIRST_FD = 'reply_to_first_fd'
@@ -180,6 +195,8 @@ class RPCKitten:
     CALL_REPLY_TO   = 'call_reply_to'
     CALL_MAX_TRIES  = 'call_max_tries'
     CALL_ALLOW_UNIX = 'call_allow_unix'
+    CALL_SEND_STDIN = 'call_send_stdin'
+    CALL_STDIN_DATA = 'call_stdin_data'
 
     TRUE_STRINGS = ['true', 't', 'yes', 'y', '1']
 
@@ -571,17 +588,25 @@ class RPCKitten:
         self._servers = await self.init_servers([])
         self._setup_service()
 
-    async def connect(self, auto_start=False, retry=3):
+    async def connect(self, url=None, auto_start=False, retry=3):
         """
         Establish a connection with the running service, optionally
         launching the service if it isn't yet running.
         """
-        self._init_logging()
+        if url and auto_start:
+            raise ValueError('Cannot auto-start remote services')
+        if url:
+            retry = 0
 
+        self._init_logging()
         for tried in range(0, retry + 1):
             try:
-                with open(self._urlfile, 'r', encoding='utf-8') as fd:
-                    self._url = fd.read().strip()
+                if url:
+                    self._unixfile = None
+                    self._url = url
+                else:
+                    with open(self._urlfile, 'r', encoding='utf-8') as fd:
+                        self._url = fd.read().strip()
 
                 pong = await self.call('ping', call_max_tries=0)
                 if pong:
@@ -825,7 +850,7 @@ class RPCKitten:
                     else:
                         raise AttributeError()
 
-                path = await self.validate_request_header(path, head)
+                path = await self.validate_request_header(req, path, head)
                 req.authed = True
             except PermissionError:
                 req.authed = False
@@ -935,7 +960,7 @@ class RPCKitten:
                 sent=(sent or False),
                 elapsed_us=elapsed_us)
 
-    async def validate_request_header(self, path, header):
+    async def validate_request_header(self, _request_info, path, header):
         """
         This checks a request header for authentication. Subclasses can override this
         to implement their own access control policies.
@@ -1051,7 +1076,7 @@ class RPCKitten:
             for k, v in kwargs.items():
                 kwargs[k] = self.guarantee_type(annotations.get(k), v)
 
-    def mutate_web_arguments(self, _req_info, annotated_func, args, kwargs):
+    def mutate_web_arguments(self, _req_info, annotated, args, kwargs):
         """Mutate incoming web arguments: modifies args and kwargs in place
 
         Subclasses can override this if they want to add custom argument
@@ -1059,8 +1084,8 @@ class RPCKitten:
         type annotations to validate/convert arguments, so if you want that
         to keep working remember to call super().mutate_web_arguments(...).
         """
-        if annotated_func:
-            self._apply_annotations(annotated_func, args, kwargs)
+        if annotated:
+            self._apply_annotations(annotated, args, kwargs)
 
     async def _handle_http_request(self, request_obj):
         def _b(v):
@@ -1107,6 +1132,7 @@ class RPCKitten:
 
         if request_obj.fds:
             args = [self._fd_from_magic_arg(a, request_obj.fds) for a in args]
+
             reply_to_fd1 = request_obj.body.pop(self.REPLY_TO_FIRST_FD, None)
             if reply_to_fd1 is not None:
                 fd = args.pop(0)
@@ -1119,6 +1145,15 @@ class RPCKitten:
                 request_obj.writer.close()
                 request_obj.writer = writer
                 request_obj.sent = int(reply_to_fd1)
+
+            if kwargs.pop(self.CALL_SEND_STDIN, False):
+                request_obj.stdin = args.pop(0)
+
+        else:
+            call_stdin_data = kwargs.pop(self.CALL_STDIN_DATA, None)
+            if call_stdin_data is not None:
+                import io
+                request_obj.stdin = io.BytesIO(call_stdin_data)
 
         if inspect.isasyncgenfunction(api_method):
             raw_method = self._wrap_async_generator(api_method)
@@ -1628,16 +1663,17 @@ Content-Length: %d
 
         ctype = hdrs['Content-Type']
         if ctype == 'application/x-msgpack':
-            decode = self.from_msgpack
+            first = decode = self.from_msgpack
         elif ctype == 'application/json':
-            decode = self.from_json
+            first = decode = self.from_json
         elif ctype == self.SSE_MIMETYPE:
-            decode = self.from_server_sent_event
+            first = decode = self.from_server_sent_event
         else:
+            first = lambda v: HttpResult(ctype, v, binary_data=True)
             decode = lambda v: v
 
         async def decoded_chunk_generator():
-            nonlocal reader, writer, buffer
+            nonlocal first, reader, writer, buffer
             if rfds:
                 yield {'received_fds': rfds}
 
@@ -1659,7 +1695,11 @@ Content-Length: %d
                 elif chunk == b'':
                     finished = True
                 else:
-                    yield decode(chunk)
+                    if first:
+                        yield first(chunk)
+                        first = None
+                    else:
+                        yield decode(chunk)
                     finished = False
 
             if not finished:
@@ -2016,10 +2056,26 @@ Content-Length: %d
             k, v = a[2:].split('=', 1)
             return k.replace('-', '_'), v
 
-        kwargs = dict(_split(a) for a in args if _is_arg(a))
-        for k in kwargs:
-            if allowed and k not in allowed:
-                raise ValueError('Unrecognized option: --%s' % k)
+        kwargs = {}
+        for key, val in (_split(a) for a in args if _is_arg(a)):
+            if allowed and key not in allowed:
+                raise ValueError('Unrecognized option: --%s' % key)
+
+            existing = kwargs.get(key)
+            if not cls.ALLOW_REPEATED_OPTIONS:
+                if existing:
+                    raise ValueError('Repeated option forbidden: --%s' % key)
+                kwargs[key] = val
+
+            elif (cls.ALLOW_REPEATED_OPTIONS is True
+                    or key in cls.ALLOW_REPEATED_OPTIONS):
+                if existing:
+                    existing.append(val)
+                else:
+                    kwargs[key] = [val]
+
+            else:
+                kwargs[key] = val
 
         return [a for a in args if not _is_arg(a)], kwargs
 
@@ -2138,6 +2194,14 @@ Content-Length: %d
                     kwargs[self.CALL_ALLOW_UNIX] = False
                 if no_msgpack:
                     kwargs[self.CALL_USE_JSON] = True
+
+                if self.SEND_STDIN_IF_NOT_A_TTY and not sys.stdin.isatty():
+                    if self._unixfile and not no_unix:
+                        kwargs[self.CALL_SEND_STDIN] = True
+                        args = [sys.stdin.buffer] + args
+                    else:
+                        stdin_data = sys.stdin.buffer.read()
+                        kwargs[self.CALL_STDIN_DATA] = stdin_data
 
                 if command == 'start':
                     await self.connect(auto_start=True)
