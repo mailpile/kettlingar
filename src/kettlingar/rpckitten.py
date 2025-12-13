@@ -395,7 +395,7 @@ class RPCKitten:
                 self._set_defaults()
 
             # We might have default config file in settings, load it?
-            if isinstance(self.worker_config, str) and not configured_from_file:
+            if self.worker_config and not configured_from_file:
                 self._configure_from_file(self.worker_config)
                 configured_from_file = True
 
