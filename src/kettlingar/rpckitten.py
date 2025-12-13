@@ -338,9 +338,16 @@ class RPCKitten:
                         key, val = (p.strip() for p in line.split('='))
                         file_config.append('--%s=%s' % (key, val))
 
-            self.configure(file_config, strict=True, set_defaults=False)
+            self.configure(file_config,
+                strict=True,
+                set_defaults=False,
+                configured_from_file=True)
 
-        def configure(self, args=None, strict=True, set_defaults=True):
+        def configure(self,
+                args=None,
+                strict=True,
+                set_defaults=True,
+                configured_from_file=False):
             """Set defaults and parse arguments to generate a configuration."""
             consumed = set()
 
@@ -378,6 +385,7 @@ class RPCKitten:
                                     self.default_config_file())
                             else:
                                 self._configure_from_file(val)
+                            configured_from_file = True
 
             unconsumed = [a for a in args if a not in consumed]
             if unconsumed and strict:
@@ -386,7 +394,13 @@ class RPCKitten:
             if set_defaults:
                 self._set_defaults()
 
-            if not consumed:
+            # We might have default config file in settings, load it?
+            if isinstance(self.worker_config, str) and not configured_from_file:
+                self._configure_from_file(self.worker_config)
+                configured_from_file = True
+
+            # No arguments at all, try to load the default config
+            if not consumed and not configured_from_file:
                 try:
                     self._configure_from_file(self.default_config_file())
                 except OSError:
