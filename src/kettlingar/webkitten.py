@@ -1,6 +1,7 @@
 """
 Mix-in for RPCKittens that also serve a "normal" website.
 """
+import copy
 import datetime
 import inspect
 import os
@@ -36,6 +37,7 @@ class Route:
             methods='',
             subpaths=False,
             mimetype='text/html',
+            kwargs=None,
             qs=False):
         self.path_rule = path_rule
         self.api_method = api_method
@@ -43,6 +45,7 @@ class Route:
         self.public = public
         self.subpaths = subpaths
         self.mimetype = mimetype
+        self.kwargs = kwargs or {}
         self.qs = qs
         self.methods = set([m.upper() for m in methods] or ('GET',))
         self.simple = (not subpaths)
@@ -53,9 +56,14 @@ class Route:
         'slug': r'[a-zA-Z0-9_-]+'}
 
     def __repr__(self):
-        return 'Route(%s, %s, template=%s, public=%s, qs=%s)' % (
+        return 'Route(%s, %s%s, %s, template=%s, public=%s, qs=%s)' % (
             repr(self.path_rule).replace('re.compile(', 're('),
-            self.api_method, self.template, self.public, self.qs)
+            self.api_method,
+            self.kwargs,
+            self.mimetype,
+            self.template,
+            self.public,
+            self.qs)
 
     def compile(self, have_jinja=True):
         """Convert django-style path rules into compiled regexes."""
@@ -99,13 +107,15 @@ class Route:
         if not (self.public or request_info.authed):
             return False
 
+        kwargs = copy.copy(self.kwargs)
         if path == self.path_rule:
-            return self, [], {}
+            return self, [], kwargs
 
         if isinstance(self.path_rule, re.Pattern):
             m = self.path_rule.match(path)
             if m:
-                return self, [], m.groupdict()
+                kwargs.update(m.groupdict())
+                return self, [], kwargs
 
         return False
 
