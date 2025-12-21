@@ -35,12 +35,14 @@ class Route:
             public=False,
             methods='',
             subpaths=False,
+            mimetype='text/html',
             qs=False):
         self.path_rule = path_rule
         self.api_method = api_method
         self.template = template
         self.public = public
         self.subpaths = subpaths
+        self.mimetype = mimetype
         self.qs = qs
         self.methods = set([m.upper() for m in methods] or ('GET',))
         self.simple = (not subpaths)
@@ -441,7 +443,8 @@ class WebKitten:
             else:
                 variables.update(await api_func(request_info, *args, **kwargs))
 
-            return HttpResult('text/html', await template.render_async(variables))
+            content = await template.render_async(variables)
+            return HttpResult(route.mimetype, content)
         except:
             self.exception('Error handling %s' % request_info.path)
             raise
