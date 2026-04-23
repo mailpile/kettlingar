@@ -2067,6 +2067,11 @@ Content-Length: %d
             return isinstance(a, str) and a[:2] == '--'
 
         def _split(a):
+            if '=' not in a[2:]:
+                k = a[2:].replace('-', '_')
+                if k[:2] == 'no':
+                    return k[2:], False
+                return k, True
             k, v = a[2:].split('=', 1)
             return k.replace('-', '_'), v
 
